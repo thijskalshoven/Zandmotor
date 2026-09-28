@@ -9,7 +9,6 @@ import json
 import numpy as np
 
 from zandmotor.config import CFG, UTC, log
-from zandmotor.wind import max_gust_window
 
 
 def lake_recent_observations(model, now):
@@ -18,7 +17,7 @@ def lake_recent_observations(model, now):
     0.02 ha reading among 64, and the lagoon did not drain that day) and then
     widens the time window until at least lake_min_obs remain.
     Returns (times, areas) with the most recent last, or (None, None)."""
-    times, areas = np.array(model["times"]), np.array(model["areas"])
+    times, areas = np.array(model.times), np.array(model.areas)
     keep = areas >= CFG["lake_min_plausible_ha"]
     dropped = int((~keep).sum())
     times, areas = times[keep], areas[keep]
@@ -56,21 +55,12 @@ def lagoon_area_from_model(model, sea_level_fn, te, wind_hist=None, lake_area=No
     """How many hectares of the lagoon are wet at time te. sea_level_fn(epoch)
     -> (level, src), same signature as WaterLevel.level. wind_hist, if given,
     is (t_arr, gust_arr) covering at least the trailing window the wind
-    model needs (only used in "wind" mode). lake_area is the precomputed
-    median from lake_area_summary, used in "lake" mode."""
-    if model["mode"] == "tidal":
-        sea_lag, _ = sea_level_fn(te - model["delay_min"] * 60)
-        area = model["damping"] * sea_lag + model["offset"]
-        return max(area, model["floor_ha"])
-    if model["mode"] == "wind" and wind_hist is not None:
-        gust = max_gust_window(wind_hist[0], wind_hist[1], te, model["window_h"])
-        if np.isfinite(gust):
-            area = model["slope"] * gust + model["offset"]
-            return float(np.clip(area, model["area_min_ha"], model["area_max_ha"]))
-    if lake_area is not None:
-        return lake_area
-    times, areas = np.array(model["times"]), np.array(model["areas"])
-    return float(np.interp(te, times, areas))
+    model needs (only used by WindResponse). lake_area is the precomputed
+    median from lake_area_summary, used by LakeResponse.
+
+    Delegates to the model's own area_at(...) - see lagoon_model.types -
+    instead of branching on a mode string."""
+    return model.area_at(sea_level_fn, te, wind_hist=wind_hist, lake_area=lake_area)
 
 
 def wetness_fingerprint(lagoon, ring):

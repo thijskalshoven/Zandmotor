@@ -27,6 +27,7 @@ from zandmotor.lagoon_model.runtime import (
     lagoon_area_from_model, lake_area_summary, lake_recent_observations,
     wet_mask_from_area, wetness_fingerprint,
 )
+from zandmotor.lagoon_model.types import model_from_dict
 from zandmotor.outline import make_outline
 from zandmotor.rendering import class_png, png_uri, terrain_rgb
 from zandmotor.terrain import (
@@ -115,7 +116,7 @@ def _load_or_fit_lagoon_model(args, grid, lagoon, ring, now, warnings):
     if args.calibrate:
         response, freq, valid_count = fit_lagoon_response(grid, lagoon, now)
         if response is not None:
-            response_file.write_text(json.dumps(response, indent=1))
+            response_file.write_text(json.dumps(response.to_dict(), indent=1))
             np.save(freq_file, freq)
             np.save(confidence_file, valid_count)
             meta_file.write_text(json.dumps({"fingerprint": fingerprint,
@@ -133,7 +134,7 @@ def _load_or_fit_lagoon_model(args, grid, lagoon, ring, now, warnings):
             # one run is unverified rather than implying it was checked.
             freq = np.load(freq_file)
             if freq.shape == lagoon.shape:
-                lagoon_model = json.loads(response_file.read_text())
+                lagoon_model = model_from_dict(json.loads(response_file.read_text()))
                 meta_file.write_text(json.dumps(
                     {"fingerprint": fingerprint, "adopted_unverified": now.isoformat()}, indent=1))
                 warnings.append("The cached wetness map predates the outline check, so this run "
@@ -150,24 +151,24 @@ def _load_or_fit_lagoon_model(args, grid, lagoon, ring, now, warnings):
         else:
             freq = np.load(freq_file)
             if freq.shape == lagoon.shape:
-                lagoon_model = json.loads(response_file.read_text())
+                lagoon_model = model_from_dict(json.loads(response_file.read_text()))
             else:
                 freq = None
     if lagoon_model is not None:
-        mode = lagoon_model["mode"]
+        mode = lagoon_model.mode
         mode_txt = {"tidal": "tidal", "wind": "wind-driven (experimental)",
                     "lake": "a slowly-varying lake"}[mode]
-        age = (now - parse_iso_datetime(lagoon_model["fitted"])).days
+        age = (now - parse_iso_datetime(lagoon_model.fitted)).days
         log.info("Lagoon response model: %s (r=%.2f, n=%d, fitted %d days ago)",
-                 mode_txt, lagoon_model["r"], lagoon_model["n"], age)
+                 mode_txt, lagoon_model.r, lagoon_model.n, age)
         if mode == "wind":
-            n_opt, n_sar = lagoon_model.get("n_optical", "?"), lagoon_model.get("n_sar", "?")
+            n_opt, n_sar = lagoon_model.n_optical, lagoon_model.n_sar
             warnings.append(f"Lagoon wet area was fitted to wind gusts rather than tide "
-                            f"(r={lagoon_model['r']:.2f} over the {lagoon_model['window_h']}h before "
-                            f"each hour, n={lagoon_model['n']} images: {n_opt} optical + {n_sar} SAR). "
+                            f"(r={lagoon_model.r:.2f} over the {lagoon_model.window_h}h before "
+                            f"each hour, n={lagoon_model.n} images: {n_opt} optical + {n_sar} SAR). "
                             "Treat this as unproven: an earlier version of this fit looked strong at "
                             "n=20 and collapsed to r=0.11 at n=64. Sea level showed ~no relationship "
-                            f"(r={lagoon_model.get('sea_r', 0):.2f}).")
+                            f"(r={lagoon_model.sea_r:.2f}).")
         if age > 90:
             warnings.append(f"Lagoon response model ({mode_txt}, fitted {age} days ago) "
                             "may be stale; run --calibrate to refit.")
@@ -211,13 +212,13 @@ def _build_frames(args, now, grid, z, lagoon, lagoon_model, freq, dry_override, 
     # search should assume about water.
     lagoon_obs, lake_area = None, None
     lagoon_label = ""
-    if lagoon_model is not None and freq is not None and lagoon_model["mode"] == "lake":
+    if lagoon_model is not None and freq is not None and lagoon_model.mode == "lake":
         med, lo, hi, as_of, n_used = lake_area_summary(lagoon_model, now)
         if med is not None:
             lake_area = med
             lagoon_label = (f"{med:.1f} ha ({lo:.1f}–{hi:.1f}), "
                             f"last seen {as_of.astimezone(TZ):%d %b}")
-            all_t, all_a = np.array(lagoon_model["times"]), np.array(lagoon_model["areas"])
+            all_t, all_a = np.array(lagoon_model.times), np.array(lagoon_model.areas)
             used_t, _ = lake_recent_observations(lagoon_model, now)
             used_set = set(used_t.tolist()) if used_t is not None else set()
             lagoon_obs = {

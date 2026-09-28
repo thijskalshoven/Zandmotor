@@ -13,6 +13,7 @@ import requests
 from scipy import ndimage
 
 from zandmotor.config import CFG, UTC, log
+from zandmotor.lagoon_model.types import LakeResponse, TidalResponse, WindResponse
 from zandmotor.satellite.client import cdse_token
 from zandmotor.satellite.optical import cdse_image, cdse_scenes
 from zandmotor.satellite.sar import cdse_sar_image, cdse_sar_scenes, sar_wet_dry
@@ -161,9 +162,9 @@ def fit_lagoon_response(grid, lagoon, now):
         floor = float(np.percentile(obs_area, 5))
         log.info("Lagoon response: TIDAL - delay %d min, damping %.2f ha/m, floor %.2f ha "
                 "(r=%.2f, n=%d images)", best_delay, m, floor, best_r, n)
-        return {"mode": "tidal", "delay_min": best_delay, "damping": m, "offset": c,
-               "floor_ha": floor, "r": best_r, "n": n, "rws_location": loc,
-               "fitted": now.isoformat(), **fallback}, freq, valid_count
+        return TidalResponse(delay_min=best_delay, damping=m, offset=c, floor_ha=floor,
+                             r=best_r, n=n, rws_location=loc, fitted=now.isoformat(),
+                             **fallback), freq, valid_count
 
     # not tidal (sea level explains ~nothing): check whether wind does instead
     lat_c = (CFG["bbox_wgs84"][1] + CFG["bbox_wgs84"][3]) / 2
@@ -190,13 +191,14 @@ def fit_lagoon_response(grid, lagoon, now):
         log.info("Lagoon response: WIND (experimental, unconfirmed at n=%d) - %dh peak "
                 "gust, r=%.2f; area = %.3f*gust_kn + %.2f ha, clipped to the observed "
                 "range", n, best_wh, best_wr, b, a)
-        return {"mode": "wind", "window_h": best_wh, "slope": b, "offset": a,
-               "area_min_ha": float(obs_area[ok].min()), "area_max_ha": float(obs_area[ok].max()),
-               "r": best_wr, "sea_r": best_r, "n": n, "fitted": now.isoformat(), **fallback}, \
-              freq, valid_count
+        return WindResponse(window_h=best_wh, slope=b, offset=a,
+                            area_min_ha=float(obs_area[ok].min()),
+                            area_max_ha=float(obs_area[ok].max()),
+                            r=best_wr, sea_r=best_r, n=n, fitted=now.isoformat(),
+                            **fallback), freq, valid_count
 
     log.info("Lagoon response: LAKE - neither sea level (r=%.2f) nor wind (r=%.2f) clear "
             "the threshold at n=%d images; area read from each image directly instead.",
             best_r, best_wr, n)
-    return {"mode": "lake", "r": best_r, "wind_r": best_wr, "n": n, "fitted": now.isoformat(),
-           **fallback}, freq, valid_count
+    return LakeResponse(r=best_r, wind_r=best_wr, n=n, fitted=now.isoformat(),
+                        **fallback), freq, valid_count
