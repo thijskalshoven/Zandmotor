@@ -17,9 +17,7 @@ from rasterio.warp import Resampling
 
 from zandmotor.config import CACHE, CFG, HERE, TZ, UTC, log
 from zandmotor.errors import ZandmotorError
-from zandmotor.flood import (
-    flats_wet_map, largest_patch_ha, remove_small_patches, rideable_at, rideable_curve,
-)
+from zandmotor.flood import compute_wet_masks, largest_patch_ha, rideable_at, rideable_curve
 from zandmotor.geometry import load_lagoon_polygon, make_grid, polygon_mask, trim_lagoon_to_water
 from zandmotor.html_report.render import write_html
 from zandmotor.kiting import kite_advice, quiver_advice
@@ -266,15 +264,11 @@ def _build_frames(args, now, grid, z, lagoon, lagoon_model, freq, dry_override, 
         else:
             lagoon_wet = lagoon.copy()
             lagoon_ha = float(lagoon.sum() * grid.cell_area_m2 / 1e4)
-        tidal_wet, ponded_wet = flats_wet_map(z, F, sea_level, coastal_zone, lagoon)
-        wet = remove_small_patches(tidal_wet | lagoon_wet, grid)
-        if dry_override is not None:
-            wet &= ~dry_override
         # The open sea and the isolated dune ponds are drawn but never counted:
         # ~610 ha and ~21 ha against a ~2.8 ha lagoon. Folded into one total they
         # made the "enough water" test impossible to fail.
-        rideable = wet & ~sea
-        uncounted = (wet & sea) | remove_small_patches(ponded_wet & ~sea, grid)
+        rideable, uncounted = compute_wet_masks(z, F, sea_level, coastal_zone, lagoon, sea,
+                                                lagoon_wet, dry_override, grid)
         # report the areas actually drawn, after small-patch removal
         lagoon_ha = float((rideable & lagoon).sum() * grid.cell_area_m2 / 1e4)
         shallows_ha = float((rideable & ~lagoon).sum() * grid.cell_area_m2 / 1e4)
@@ -305,9 +299,12 @@ def _build_frames(args, now, grid, z, lagoon, lagoon_model, freq, dry_override, 
                  lagoon_ha, shallows_ha, rideable_ha, usable_ha, verdict,
                  "dark" if dark else "    ", src)
 
-    # The window search reads areas off the precomputed curve rather than
-    # rebuilding every mask, so the two paths could drift. What matters is not
-    # that the hectares match exactly - the curve interpolates a steep,
+    # Both paths now run through the same compute_wet_masks, so this is no
+    # longer a check for two divergent implementations - but the window search
+    # still reads areas off a sea-level-sampled, interpolated curve rather
+    # than the frame loop's exact per-hour computation, and that
+    # approximation could still disagree near a threshold. What matters is
+    # not that the hectares match exactly - the curve interpolates a steep,
     # patch-merging relationship and will be off by some margin mid-tide - but
     # that they never reach a different VERDICT for the same hour, which is
     # what the sidebar and the "next window" line would then disagree about.

@@ -77,26 +77,43 @@ def largest_patch_ha(wet, cell_area_m2):
     return float(counts.max() * cell_area_m2 / 1e4)
 
 
+def compute_wet_masks(z, F, sea_level, coastal_zone, lagoon, sea, lagoon_wet, dry_override, grid):
+    """The rideable/uncounted mask pipeline: flood-classify, drop small
+    patches, apply the satellite dry-override, then split off the open sea.
+
+    Shared by the per-hour frame loop (called once per exact sea level) and
+    rideable_curve (called once per sampled level, then interpolated for the
+    week-long window search) so the classification logic itself only exists
+    once - a change here can no longer update one call site and not the
+    other. Returns (rideable, uncounted)."""
+    tidal_wet, ponded_wet = flats_wet_map(z, F, sea_level, coastal_zone, lagoon)
+    wet = remove_small_patches(tidal_wet | lagoon_wet, grid)
+    if dry_override is not None:
+        wet &= ~dry_override
+    rideable = wet & ~sea
+    uncounted = (wet & sea) | remove_small_patches(ponded_wet & ~sea, grid)
+    return rideable, uncounted
+
+
 def rideable_curve(z, F, coastal_zone, lagoon, sea, lagoon_wet, dry_override, grid, levels):
     """(total_ha, largest_patch_ha) at each sea level in `levels`.
 
     Precomputed so the week-long window search doesn't rerun the flood model at
-    every candidate hour. Mirrors the frame loop step for step, so the sidebar
-    and the "next window" line cannot disagree. Wet area is monotonic in sea
-    level, so interpolating between samples is safe.
+    every candidate hour, by sampling compute_wet_masks at a grid of sea levels
+    and interpolating between them. Wet area is monotonic in sea level, so
+    that interpolation is safe - but it is still an approximation of the exact
+    per-hour computation the frame loop does, which is what rideable_at's
+    caller checks against the frame loop's own verdicts (see cli.py).
 
     Assumes the lagoon's own wet mask is fixed across the run - exactly true in
     lake mode (its area is one measured constant); an approximation in the tidal
     and wind modes, where it only affects the window search, not the frames."""
     tot, big = [], []
     for lv in levels:
-        tidal, _ = flats_wet_map(z, F, float(lv), coastal_zone, lagoon)
-        wet = remove_small_patches(tidal | lagoon_wet, grid)
-        if dry_override is not None:
-            wet &= ~dry_override
-        wet &= ~sea
-        tot.append(wet.sum() * grid.cell_area_m2 / 1e4)
-        big.append(largest_patch_ha(wet, grid.cell_area_m2))
+        rideable, _ = compute_wet_masks(z, F, float(lv), coastal_zone, lagoon, sea, lagoon_wet,
+                                        dry_override, grid)
+        tot.append(rideable.sum() * grid.cell_area_m2 / 1e4)
+        big.append(largest_patch_ha(rideable, grid.cell_area_m2))
     return np.asarray(tot, float), np.asarray(big, float)
 
 
