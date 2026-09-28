@@ -363,12 +363,7 @@ def permanent_sea_mask(z, lagoon, min_level):
 # ----------------------------------------------------------------------------
 # Water level (Rijkswaterstaat ddapi20)
 # ----------------------------------------------------------------------------
-def _rws_time(t):
-    return t.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.000+00:00")
-
-
-def _parse_time(s):
-    return dt.datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(UTC)
+from zandmotor.time_utils import format_rws_datetime, parse_iso_datetime
 
 
 def rws_series(location, start, end, proces):
@@ -380,8 +375,8 @@ def rws_series(location, start, end, proces):
             aquo["ProcesType"] = proces
         body = {"Locatie": {"Code": location},
                 "AquoPlusWaarnemingMetadata": {"AquoMetadata": aquo},
-                "Periode": {"Begindatumtijd": _rws_time(start),
-                            "Einddatumtijd": _rws_time(end)}}
+                "Periode": {"Begindatumtijd": format_rws_datetime(start),
+                            "Einddatumtijd": format_rws_datetime(end)}}
         return requests.post(CFG["rws_url"], json=body, timeout=90)
 
     resp = request(True)
@@ -407,7 +402,7 @@ def rws_series(location, start, end, proces):
             v = (m.get("Meetwaarde") or {}).get("Waarde_Numeriek")
             if v is None or abs(v) > 5000:
                 continue
-            pts[_parse_time(m["Tijdstip"]).timestamp()] = v * scale
+            pts[parse_iso_datetime(m["Tijdstip"]).timestamp()] = v * scale
     if not pts:
         return np.array([]), np.array([])
     t = np.array(sorted(pts))
@@ -696,8 +691,8 @@ def cdse_token():
 
 def cdse_scenes(token, now, days_back=None, max_scenes=None):
     body = {"bbox": list(CFG["bbox_wgs84"]),
-            "datetime": f"{_rws_time(now - dt.timedelta(days=days_back or CFG['sat_days_back']))[:19]}Z/"
-                        f"{_rws_time(now)[:19]}Z",
+            "datetime": f"{format_rws_datetime(now - dt.timedelta(days=days_back or CFG['sat_days_back']))[:19]}Z/"
+                        f"{format_rws_datetime(now)[:19]}Z",
             "collections": ["sentinel-2-l2a"], "limit": 100,
             "filter": {"op": "<", "args": [{"property": "eo:cloud_cover"},
                                            CFG["sat_max_cloud"]]},
@@ -705,7 +700,7 @@ def cdse_scenes(token, now, days_back=None, max_scenes=None):
     r = requests.post(CFG["cdse_catalog_url"], json=body, timeout=60,
                       headers={"Authorization": f"Bearer {token}"})
     r.raise_for_status()
-    times = sorted({_parse_time(f["properties"]["datetime"]) for f in r.json()["features"]},
+    times = sorted({parse_iso_datetime(f["properties"]["datetime"]) for f in r.json()["features"]},
                    reverse=True)
     # one per day, newest first
     seen, out = set(), []
@@ -753,8 +748,8 @@ def cdse_sar_scenes(token, now, days_back=None, max_scenes=None):
     consistent backscatter geometry (ascending/descending look very
     different over the same ground)."""
     body = {"bbox": list(CFG["bbox_wgs84"]),
-            "datetime": f"{_rws_time(now - dt.timedelta(days=days_back or CFG['sar_days_back']))[:19]}Z/"
-                        f"{_rws_time(now)[:19]}Z",
+            "datetime": f"{format_rws_datetime(now - dt.timedelta(days=days_back or CFG['sar_days_back']))[:19]}Z/"
+                        f"{format_rws_datetime(now)[:19]}Z",
             "collections": ["sentinel-1-grd"], "limit": 100,
             "filter": {"op": "=", "args": [{"property": "sat:orbit_state"}, CFG["sar_orbit"]]},
             "filter-lang": "cql2-json"}
@@ -764,11 +759,11 @@ def cdse_sar_scenes(token, now, days_back=None, max_scenes=None):
     start_bound = now - span
     while cursor_end > start_bound:
         chunk_start = max(cursor_end - dt.timedelta(days=60), start_bound)
-        body["datetime"] = f"{_rws_time(chunk_start)[:19]}Z/{_rws_time(cursor_end)[:19]}Z"
+        body["datetime"] = f"{format_rws_datetime(chunk_start)[:19]}Z/{format_rws_datetime(cursor_end)[:19]}Z"
         r = requests.post(CFG["cdse_catalog_url"], json=body, timeout=60,
                           headers={"Authorization": f"Bearer {token}"})
         r.raise_for_status()
-        times += [_parse_time(f["properties"]["datetime"]) for f in r.json()["features"]]
+        times += [parse_iso_datetime(f["properties"]["datetime"]) for f in r.json()["features"]]
         cursor_end = chunk_start
     seen, out = set(), []
     for t in sorted(times, reverse=True):
@@ -2209,7 +2204,7 @@ def main():
         warnings.append("Lagoon outline comes from OpenStreetMap and may be outdated. "
                         "Run --outline sentinel for one traced from a recent satellite image.")
     elif props.get("image_time"):
-        age = (now - _parse_time(props["image_time"])).days
+        age = (now - parse_iso_datetime(props["image_time"])).days
         if age > 60:
             warnings.append(f"Lagoon outline is from a satellite image {age} days old. "
                             "Run --outline to refresh it.")
@@ -2275,7 +2270,7 @@ def main():
         mode = lagoon_model["mode"]
         mode_txt = {"tidal": "tidal", "wind": "wind-driven (experimental)",
                     "lake": "a slowly-varying lake"}[mode]
-        age = (now - _parse_time(lagoon_model["fitted"])).days
+        age = (now - parse_iso_datetime(lagoon_model["fitted"])).days
         log.info("Lagoon response model: %s (r=%.2f, n=%d, fitted %d days ago)",
                  mode_txt, lagoon_model["r"], lagoon_model["n"], age)
         if mode == "wind":
