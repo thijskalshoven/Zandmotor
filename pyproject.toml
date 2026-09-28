@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zandmotor"
+version = "0.1.0"
+description = "Zandmotor lagoon nowcast for kitesurfing"
+requires-python = ">=3.9"
+dependencies = [
+    "requests",
+    "numpy",
+    "rasterio",
+    "pyproj",
+    "scikit-image",
+    "pillow",
+    "scipy",
+]
+
+[project.optional-dependencies]
+tide = ["utide"]
+dev = ["pytest"]
+
+[project.scripts]
+zandmotor = "zandmotor.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["zandmotor*"]
+
+[tool.setuptools.package-data]
+zandmotor = ["html_report/template.html"]
