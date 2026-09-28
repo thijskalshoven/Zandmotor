@@ -6,10 +6,10 @@ import datetime as dt
 
 import numpy as np
 import requests
-from rasterio.io import MemoryFile
 from scipy import ndimage
 
 from zandmotor.config import CFG
+from zandmotor.satellite.client import dedupe_scenes_one_per_day, process_image
 from zandmotor.time_utils import format_rws_datetime, parse_iso_datetime
 
 SAR_EVALSCRIPT = """//VERSION=3
@@ -44,34 +44,14 @@ def cdse_sar_scenes(token, now, days_back=None, max_scenes=None):
         r.raise_for_status()
         times += [parse_iso_datetime(f["properties"]["datetime"]) for f in r.json()["features"]]
         cursor_end = chunk_start
-    seen, out = set(), []
-    for t in sorted(times, reverse=True):
-        if t.date() not in seen:
-            seen.add(t.date())
-            out.append(t)
-    return out[:max_scenes or CFG["sar_max_scenes"]]
+    return dedupe_scenes_one_per_day(times)[:max_scenes or CFG["sar_max_scenes"]]
 
 
 def cdse_sar_image(token, grid, t):
     """Returns vv, vh (dB backscatter) on the grid."""
-    day0 = t.replace(hour=0, minute=0, second=0, microsecond=0)
-    body = {"input": {"bounds": {"bbox": list(grid.bounds_3857),
-                                 "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/3857"}},
-                      "data": [{"type": "sentinel-1-grd",
-                                "dataFilter": {"timeRange": {
-                                    "from": day0.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                                    "to": (day0 + dt.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")},
-                                    "acquisitionMode": "IW", "polarization": "DV",
-                                    "orbitDirection": CFG["sar_orbit"].upper()}}]},
-            "output": {"width": grid.width, "height": grid.height,
-                       "responses": [{"identifier": "default",
-                                      "format": {"type": "image/tiff"}}]},
-            "evalscript": SAR_EVALSCRIPT}
-    r = requests.post(CFG["cdse_process_url"], json=body, timeout=120,
-                      headers={"Authorization": f"Bearer {token}"})
-    r.raise_for_status()
-    with MemoryFile(r.content) as mem, mem.open() as src:
-        a = src.read().astype("float32")
+    a = process_image(token, grid, t, collection="sentinel-1-grd", evalscript=SAR_EVALSCRIPT,
+                      extra_data_filter={"acquisitionMode": "IW", "polarization": "DV",
+                                         "orbitDirection": CFG["sar_orbit"].upper()})
     return a[0], a[1]
 
 
