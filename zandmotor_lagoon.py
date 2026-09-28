@@ -128,7 +128,6 @@ import requests
 from PIL import Image
 from pyproj import Transformer
 from rasterio.features import rasterize
-from rasterio.io import MemoryFile
 from rasterio.transform import from_bounds
 from rasterio.warp import Resampling, reproject
 from scipy import ndimage
@@ -162,7 +161,7 @@ from zandmotor.terrain import (
 # ----------------------------------------------------------------------------
 # Water level (Rijkswaterstaat ddapi20)
 # ----------------------------------------------------------------------------
-from zandmotor.time_utils import format_rws_datetime, parse_iso_datetime
+from zandmotor.time_utils import parse_iso_datetime
 from zandmotor.tides import rws_series, WaterLevel
 
 
@@ -176,148 +175,11 @@ from zandmotor.wind import (
 
 
 # ----------------------------------------------------------------------------
-# Satellite calibration (Copernicus Data Space, Sentinel-2)
+# Satellite calibration (Copernicus Data Space, Sentinel-1/2)
 # ----------------------------------------------------------------------------
-EVALSCRIPT = """//VERSION=3
-function setup() {
-  return {input: [{bands: ["B02", "B03", "B04", "B08", "SCL"]}],
-          output: {bands: 5, sampleType: "FLOAT32"}};
-}
-function evaluatePixel(s) {
-  return [(s.B03 - s.B08) / (s.B03 + s.B08 + 1e-6), s.SCL, s.B04, s.B03, s.B02];
-}"""
-
-
-def cdse_token():
-    cid, secret = os.environ.get("CDSE_CLIENT_ID"), os.environ.get("CDSE_CLIENT_SECRET")
-    if not cid or not secret:
-        raise RuntimeError("Set CDSE_CLIENT_ID and CDSE_CLIENT_SECRET for --calibrate "
-                           "(see top of file).")
-    r = requests.post(CFG["cdse_token_url"], data={"grant_type": "client_credentials",
-                                                  "client_id": cid, "client_secret": secret},
-                      timeout=30)
-    r.raise_for_status()
-    return r.json()["access_token"]
-
-
-def cdse_scenes(token, now, days_back=None, max_scenes=None):
-    body = {"bbox": list(CFG["bbox_wgs84"]),
-            "datetime": f"{format_rws_datetime(now - dt.timedelta(days=days_back or CFG['sat_days_back']))[:19]}Z/"
-                        f"{format_rws_datetime(now)[:19]}Z",
-            "collections": ["sentinel-2-l2a"], "limit": 100,
-            "filter": {"op": "<", "args": [{"property": "eo:cloud_cover"},
-                                           CFG["sat_max_cloud"]]},
-            "filter-lang": "cql2-json"}
-    r = requests.post(CFG["cdse_catalog_url"], json=body, timeout=60,
-                      headers={"Authorization": f"Bearer {token}"})
-    r.raise_for_status()
-    times = sorted({parse_iso_datetime(f["properties"]["datetime"]) for f in r.json()["features"]},
-                   reverse=True)
-    # one per day, newest first
-    seen, out = set(), []
-    for t in times:
-        if t.date() not in seen:
-            seen.add(t.date())
-            out.append(t)
-    return out[:max_scenes or CFG["sat_max_scenes"]]
-
-
-def cdse_image(token, grid, t):
-    """Returns ndwi, scl, rgb (H, W, 3 reflectance) on the grid."""
-    day0 = t.replace(hour=0, minute=0, second=0, microsecond=0)
-    body = {"input": {"bounds": {"bbox": list(grid.bounds_3857),
-                                 "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/3857"}},
-                      "data": [{"type": "sentinel-2-l2a",
-                                "dataFilter": {"timeRange": {
-                                    "from": day0.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                                    "to": (day0 + dt.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")},
-                                    "mosaickingOrder": "leastCC"}}]},
-            "output": {"width": grid.width, "height": grid.height,
-                       "responses": [{"identifier": "default",
-                                      "format": {"type": "image/tiff"}}]},
-            "evalscript": EVALSCRIPT}
-    r = requests.post(CFG["cdse_process_url"], json=body, timeout=120,
-                      headers={"Authorization": f"Bearer {token}"})
-    r.raise_for_status()
-    with MemoryFile(r.content) as mem, mem.open() as src:
-        a = src.read().astype("float32")
-    return a[0], a[1], np.moveaxis(a[2:5], 0, -1)
-
-
-SAR_EVALSCRIPT = """//VERSION=3
-function setup() {
-  return {input: [{bands: ["VV", "VH"]}],
-          output: {bands: 2, sampleType: "FLOAT32"}};
-}
-function evaluatePixel(s) {
-  return [10*Math.log10(s.VV), 10*Math.log10(s.VH)];
-}"""
-
-
-def cdse_sar_scenes(token, now, days_back=None, max_scenes=None):
-    """Sentinel-1 GRD scenes, one per day, fixed orbit direction for
-    consistent backscatter geometry (ascending/descending look very
-    different over the same ground)."""
-    body = {"bbox": list(CFG["bbox_wgs84"]),
-            "datetime": f"{format_rws_datetime(now - dt.timedelta(days=days_back or CFG['sar_days_back']))[:19]}Z/"
-                        f"{format_rws_datetime(now)[:19]}Z",
-            "collections": ["sentinel-1-grd"], "limit": 100,
-            "filter": {"op": "=", "args": [{"property": "sat:orbit_state"}, CFG["sar_orbit"]]},
-            "filter-lang": "cql2-json"}
-    times = []
-    cursor_end = now
-    span = dt.timedelta(days=days_back or CFG["sar_days_back"])
-    start_bound = now - span
-    while cursor_end > start_bound:
-        chunk_start = max(cursor_end - dt.timedelta(days=60), start_bound)
-        body["datetime"] = f"{format_rws_datetime(chunk_start)[:19]}Z/{format_rws_datetime(cursor_end)[:19]}Z"
-        r = requests.post(CFG["cdse_catalog_url"], json=body, timeout=60,
-                          headers={"Authorization": f"Bearer {token}"})
-        r.raise_for_status()
-        times += [parse_iso_datetime(f["properties"]["datetime"]) for f in r.json()["features"]]
-        cursor_end = chunk_start
-    seen, out = set(), []
-    for t in sorted(times, reverse=True):
-        if t.date() not in seen:
-            seen.add(t.date())
-            out.append(t)
-    return out[:max_scenes or CFG["sar_max_scenes"]]
-
-
-def cdse_sar_image(token, grid, t):
-    """Returns vv, vh (dB backscatter) on the grid."""
-    day0 = t.replace(hour=0, minute=0, second=0, microsecond=0)
-    body = {"input": {"bounds": {"bbox": list(grid.bounds_3857),
-                                 "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/3857"}},
-                      "data": [{"type": "sentinel-1-grd",
-                                "dataFilter": {"timeRange": {
-                                    "from": day0.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                                    "to": (day0 + dt.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")},
-                                    "acquisitionMode": "IW", "polarization": "DV",
-                                    "orbitDirection": CFG["sar_orbit"].upper()}}]},
-            "output": {"width": grid.width, "height": grid.height,
-                       "responses": [{"identifier": "default",
-                                      "format": {"type": "image/tiff"}}]},
-            "evalscript": SAR_EVALSCRIPT}
-    r = requests.post(CFG["cdse_process_url"], json=body, timeout=120,
-                      headers={"Authorization": f"Bearer {token}"})
-    r.raise_for_status()
-    with MemoryFile(r.content) as mem, mem.open() as src:
-        a = src.read().astype("float32")
-    return a[0], a[1]
-
-
-def sar_wet_dry(vv):
-    """Classify SAR backscatter into wet/dry/uncertain after despeckling.
-    Deliberately conservative: only pixels clearly past sar_water_db on
-    either side count, since wind-roughened water sits in the ambiguous
-    middle and misclassifying it would bias against the wind effect we're
-    trying to observe, not just add noise."""
-    finite = np.nan_to_num(vv, nan=-40.0, posinf=-40.0, neginf=-40.0)
-    smooth = ndimage.median_filter(finite, size=3)
-    wet = smooth < CFG["sar_water_db"] - CFG["sar_margin_db"]
-    dry = smooth > CFG["sar_water_db"] + CFG["sar_margin_db"]
-    return wet, dry
+from zandmotor.satellite.client import cdse_token
+from zandmotor.satellite.optical import cdse_scenes, cdse_image
+from zandmotor.satellite.sar import cdse_sar_scenes, cdse_sar_image, sar_wet_dry
 
 
 def fit_lagoon_response(grid, lagoon, now):
