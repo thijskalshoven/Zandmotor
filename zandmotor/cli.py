@@ -40,6 +40,18 @@ from zandmotor.wind import fetch_sea_temp, fetch_wind, is_daylight, sea_temp_at,
 from zandmotor.windows import find_windows, format_window
 
 
+def _source(name, when, now, detail="", stale_days=None):
+    """One row of the report's "Data sources" list: what the data is, when
+    it was last pulled or captured, and whether that is old enough to act on.
+    `when` is a UTC datetime, or None when there is no such data."""
+    if when is None:
+        return {"name": name, "when": "none", "age": "", "detail": detail, "stale": True}
+    days = (now - when).days
+    age = "today" if days < 1 else "yesterday" if days < 2 else f"{days} days ago"
+    return {"name": name, "when": when.astimezone(TZ).strftime("%a %d %b %Y"), "age": age,
+            "detail": detail, "stale": stale_days is not None and days > stale_days}
+
+
 def _parse_args():
     ap = argparse.ArgumentParser(description="Zandmotor lagoon nowcast for kitesurfing")
     ap.add_argument("--hours", type=int, default=8, help="hours ahead (default 8)")
@@ -54,7 +66,7 @@ def _parse_args():
     return ap.parse_args()
 
 
-def _load_terrain_and_outline(args, grid, now, warnings):
+def _load_terrain_and_outline(args, grid, now, warnings, sources):
     """Terrain (raw + prepared) and the lagoon outline/mask, trimmed to what
     the elevation data actually shows as water. Returns (z, ring, lagoon,
     terrain_note)."""
@@ -65,6 +77,10 @@ def _load_terrain_and_outline(args, grid, now, warnings):
         z_raw = fetch_ahn(grid)
         terrain_note = "AHN (PDOK)"
         dem_age = dem_age_days()
+        sources.append(_source("Terrain (AHN)",
+                               None if dem_age is None else now - dt.timedelta(days=dem_age),
+                               now, "downloaded; the survey itself is older",
+                               CFG["dem_max_age_days"]))
         if dem_age is not None and dem_age > CFG["dem_max_age_days"]:
             warnings.append(f"Cached AHN terrain is {dem_age:.0f} days old. Zandmotor is built "
                             "to reshape, and this DEM decides which of the traced outline counts "
@@ -93,6 +109,12 @@ def _load_terrain_and_outline(args, grid, now, warnings):
         if age > 60:
             warnings.append(f"Lagoon outline is from a satellite image {age} days old. "
                             "Run --outline to refresh it.")
+    if props and props.get("image_time"):
+        sources.append(_source("Lagoon outline", parse_iso_datetime(props["image_time"]), now,
+                               "satellite image it was traced from", 60))
+    else:
+        sources.append(_source("Lagoon outline", None, now,
+                               "from OpenStreetMap" if props else "placeholder"))
     lagoon = polygon_mask(grid, ring)
 
     ring, lagoon, cut_ha = trim_lagoon_to_water(ring, lagoon, z_raw, grid)
@@ -103,7 +125,7 @@ def _load_terrain_and_outline(args, grid, now, warnings):
     return z, ring, lagoon, terrain_note
 
 
-def _load_or_fit_lagoon_model(args, grid, lagoon, ring, now, warnings):
+def _load_or_fit_lagoon_model(args, grid, lagoon, ring, now, warnings, sources):
     """Loads the cached lagoon wetness model (refitting first if --calibrate),
     verifying it was fitted against the current outline. Also refreshes the
     satellite dry-ground override for the flats. Returns (lagoon_model, freq,
@@ -172,6 +194,19 @@ def _load_or_fit_lagoon_model(args, grid, lagoon, ring, now, warnings):
         if age > 90:
             warnings.append(f"Lagoon response model ({mode_txt}, fitted {age} days ago) "
                             "may be stale; run --calibrate to refit.")
+        # The lagoon's size only moves when new images are pulled in, so how old
+        # the newest one is says how current the "Lagoon water" figure is.
+        latest = (dt.datetime.fromtimestamp(max(lagoon_model.times), UTC)
+                  if lagoon_model.times else None)
+        stale = CFG["lagoon_obs_stale_days"]
+        sources.append(_source("Satellite images (lagoon size)", latest, now,
+                               f"newest image; last pulled "
+                               f"{parse_iso_datetime(lagoon_model.fitted).astimezone(TZ):%d %b} "
+                               "with --calibrate", stale))
+        if latest is not None and (now - latest).days > stale:
+            warnings.append(f"The newest satellite image of the lagoon is "
+                            f"{(now - latest).days} days old, so the lagoon size may be out "
+                            "of date. Run --calibrate to pull in recent images.")
     else:
         warnings.append("No satellite-fitted lagoon response model yet; showing the "
                         "whole traced outline as wet until one exists. Run --calibrate "
@@ -291,6 +326,10 @@ def _build_frames(args, now, grid, z, lagoon, lagoon_model, freq, dry_override, 
                        "shallows_ha": shallows_ha, "rideable_ha": rideable_ha,
                        "usable_ha": usable_ha,
                        "wind": wind_txt, "verdict": verdict, "notes": notes,
+                       # raw numbers for the map's compass rose (None without a forecast)
+                       "wind_deg": None if w is None else round(w[2], 1),
+                       "wind_kn": None if w is None else round(w[0], 1),
+                       "gust_kn": None if w is None else round(w[1], 1),
                        "dark": dark, "water_c": water_c,
                        "wetsuit": suit, "wetsuit_note": suit_note,
                        "quiver": quiver,
@@ -351,10 +390,10 @@ def _search_windows_and_tides(now, water, wind, daylight, curve, lake_area, end)
 
 
 def _render(args, frames, grid, ring, water, terrain_note, warnings, z, windows, tides,
-           lagoon_obs, lagoon_label):
+           lagoon_obs, lagoon_label, sources):
     out = HERE / args.out
     write_html(out, frames, grid, ring, water.location, terrain_note, warnings,
-               png_uri(terrain_rgb(z)), windows, tides, lagoon_obs, lagoon_label)
+               png_uri(terrain_rgb(z)), windows, tides, lagoon_obs, lagoon_label, sources)
     log.info("Written %s (%.2f MB)", out, out.stat().st_size / 1e6)
     if not args.no_open:
         webbrowser.open(out.as_uri())
@@ -374,18 +413,21 @@ def main():
     end = now + dt.timedelta(hours=args.hours)
     grid = make_grid(CFG["bbox_wgs84"], CFG["grid_res_m"])
     warnings = []
+    sources = []
     CACHE.mkdir(exist_ok=True)
     prune_cache()
 
     try:
-        z, ring, lagoon, terrain_note = _load_terrain_and_outline(args, grid, now, warnings)
+        z, ring, lagoon, terrain_note = _load_terrain_and_outline(args, grid, now, warnings, sources)
         lagoon_model, freq, dry_override = _load_or_fit_lagoon_model(
-            args, grid, lagoon, ring, now, warnings)
+            args, grid, lagoon, ring, now, warnings, sources)
         frames, times, curve, water, wind, daylight, lagoon_obs, lagoon_label, lake_area = \
             _build_frames(args, now, grid, z, lagoon, lagoon_model, freq, dry_override, warnings)
         windows, tides = _search_windows_and_tides(now, water, wind, daylight, curve, lake_area, end)
+        sources.append(_source("Tide and wind forecasts", dt.datetime.now(UTC), now,
+                               "pulled fresh on every run"))
         _render(args, frames, grid, ring, water, terrain_note, warnings, z, windows, tides,
-               lagoon_obs, lagoon_label)
+               lagoon_obs, lagoon_label, sources)
     except ZandmotorError as e:
         sys.exit(str(e))
 

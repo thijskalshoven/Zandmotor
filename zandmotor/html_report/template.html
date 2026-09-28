@@ -23,9 +23,20 @@ input[type=range]{width:100%;margin:16px 0 4px;accent-color:var(--buoy)}
 dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:16px 0;font-size:15px}
 dt{color:var(--muted)}dd{margin:0;font-weight:500;text-align:right}
 svg.chart{width:100%;height:120px;display:block;margin-top:6px}
-.legend{margin-top:16px;font-size:14px}
-.legend div{display:flex;align-items:center;gap:8px;margin:4px 0}
-.north{background:rgba(255,255,255,.9);border-radius:6px;padding:4px 6px 1px;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.legend{background:rgba(255,255,255,.92);border-radius:8px;padding:6px 10px;box-shadow:0 1px 4px rgba(0,0,0,.25);font-size:12px;line-height:1.3;max-width:230px;color:var(--ink)}
+.legend div{display:flex;align-items:center;gap:8px;margin:3px 0}
+.legend .sw{flex-shrink:0}
+.obs{display:grid;grid-template-columns:auto auto 1fr;margin-top:6px}
+.obs-ytitle{writing-mode:vertical-rl;transform:rotate(180deg);text-align:center;font-size:11px;color:var(--muted);height:120px}
+.obs-yticks{position:relative;width:18px;height:120px;font-size:10px;color:var(--muted)}
+.obs-yticks span{position:absolute;right:3px;transform:translateY(-50%)}
+.obs-plot svg.chart{margin-top:0}
+.obs-x{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:2px}
+.obs-x .obs-xtitle{font-size:11px}
+.windrose{background:rgba(255,255,255,.92);border-radius:10px;padding:6px 6px 4px;box-shadow:0 1px 4px rgba(0,0,0,.25);text-align:center;font-family:"Barlow Semi Condensed",Barlow,sans-serif;color:var(--ink)}
+.windrose svg{display:block}
+.windrose .wr-txt{font-size:13px;font-weight:700;line-height:1.1;margin-top:2px}
+.windrose .wr-sub{font-size:11px;color:var(--muted);line-height:1.1}
 .sw{width:18px;height:12px;border-radius:3px;border:1px solid rgba(0,0,0,.12)}
 .fine{font-size:12px;color:var(--muted);margin-top:18px;line-height:1.45}
 .warn{background:#fff4e5;border:1px solid #f3d3a8;border-radius:8px;padding:8px 10px;font-size:13px;margin-bottom:14px}
@@ -52,6 +63,13 @@ table.tides{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0 2px}
 table.tides td{padding:2px 0;border-bottom:1px solid var(--line)}
 table.tides td:last-child{text-align:right;font-weight:500}
 table.tides td.kind{color:var(--muted);width:42%}
+.sources{margin-top:24px;padding-top:18px;border-top:1px solid var(--line)}
+.sources h2{font-family:"Barlow Semi Condensed",Barlow,sans-serif;font-size:19px;margin:0 0 8px}
+.src{display:grid;grid-template-columns:1fr auto;gap:0 12px;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px}
+.src:last-child{border-bottom:none}
+.src-name{font-weight:600}.src-when{text-align:right;font-weight:500}
+.src-detail,.src-age{color:var(--muted);font-size:12px}.src-age{text-align:right}
+.src.stale .src-when,.src.stale .src-age{color:var(--no);font-weight:600}
 @media (max-width:760px){html,body{height:auto}.app{display:flex;flex-direction:column;height:auto}#map{order:-1;height:55vh;position:sticky;top:0;z-index:1}aside{overflow:visible;border-right:0;border-top:1px solid var(--line);background:var(--paper);position:relative;z-index:2}}
 </style></head><body>
 <div class="app">
@@ -81,11 +99,13 @@ table.tides td.kind{color:var(--muted);width:42%}
   <div class="sub" style="margin:8px 0 0">Rideable water: lagoon + intertidal beach (bars)</div>
   <svg class="chart" id="chart" viewBox="0 0 300 120" preserveAspectRatio="none"></svg>
   <div class="sub" id="lagoonObsLabel" style="margin:8px 0 0"></div>
-  <svg class="chart" id="obschart" viewBox="0 0 300 90" preserveAspectRatio="none"></svg>
-  <div class="legend">
-    <div><span class="sw" style="background:rgb(56,126,168)"></span>Rideable water: lagoon + intertidal beach</div>
-    <div><span class="sw" style="background:rgba(56,126,168,.28)"></span>Open sea and isolated dune ponds — drawn, not counted</div>
-    <div><span class="sw" style="background:none;border:2px dashed var(--buoy)"></span>Lagoon outline used for the numbers</div>
+  <div class="obs" id="obswrap">
+    <div class="obs-ytitle">Lagoon water (ha)</div>
+    <div class="obs-yticks" id="obsYticks"></div>
+    <div class="obs-plot">
+      <svg class="chart" id="obschart" viewBox="0 0 300 90" preserveAspectRatio="none"></svg>
+      <div class="obs-x"><span id="obsX0"></span><span class="obs-xtitle">Satellite image date</span><span id="obsX1"></span></div>
+    </div>
   </div>
   <div class="quiver">
     <h2>My kite quiver</h2>
@@ -94,6 +114,10 @@ table.tides td.kind{color:var(--muted);width:42%}
     <p class="fine" style="margin-top:8px">Ranges for <span id="riderInfo"></span>: manufacturer 75&nbsp;kg charts
     shifted by weight (width kept), capped at your <span id="ceilingInfo"></span>&nbsp;kn ceiling. Upper limits are
     tested against the gust, not the mean. <b>e</b> = estimated, no chart found. A starting point, not gospel.</p>
+  </div>
+  <div class="sources">
+    <h2>Data sources</h2>
+    <div id="sources"></div>
   </div>
   <p class="fine">Water level source per hour: <span id="src"></span>. Terrain: __TERRAIN__.
   Areas cover the lagoon and the intertidal beach only &mdash; the open sea is drawn but never counted.
@@ -106,7 +130,7 @@ table.tides td.kind{color:var(--muted);width:42%}
 const D = __DATA__;
 let overlay = null;
 try {
-  const map = L.map('map', {zoomControl:true});
+  const map = L.map('map', {zoomControl:false});
   const aerial = L.tileLayer('https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_orthoHR/EPSG:3857/{z}/{x}/{y}.jpeg',
     {maxZoom:19, attribution:'Luchtfoto &copy; PDOK'});
   const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -119,12 +143,37 @@ try {
   L.control.layers(bases, null, {position:'topright'}).addTo(map);
   // lagoon plus the sea and dunes around it (whole modelled area on the terrain view)
   map.fitBounds(pick === 'terrain' ? D.bounds : L.latLngBounds(D.lagoon_bounds).pad(1.2));
-  const North = L.Control.extend({options:{position:'topright'}, onAdd(){
-    const d = L.DomUtil.create('div','north'); d.title = 'North is up';
-    d.innerHTML = '<svg viewBox="0 0 24 38" width="24" height="38" aria-label="North"><path d="M12 2 L20 25 L12 19 L4 25 Z" fill="#10293a" stroke="#fff" stroke-width="1.5"/><text x="12" y="36" text-anchor="middle" font-family="Barlow,sans-serif" font-size="11" font-weight="700" fill="#10293a">N</text></svg>';
+  // Compass rose, top-left: the arrow points where the wind blows TO
+  // (the forecast gives where it comes FROM, so it is turned 180 degrees).
+  const Rose = L.Control.extend({options:{position:'topleft'}, onAdd(){
+    const d = L.DomUtil.create('div','windrose'); d.id = 'windrose';
+    L.DomEvent.disableClickPropagation(d);
+    let ticks = '';
+    for (let a = 0; a < 360; a += 22.5){
+      const major = a % 90 === 0, r0 = major ? 30 : 33;
+      ticks += `<line x1="0" y1="${-r0}" x2="0" y2="-37" transform="rotate(${a})" stroke="#10293a" stroke-width="${major?1.6:0.8}" opacity="${major?0.9:0.5}"/>`;
+    }
+    const lbl = (t,x,y,c) => `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="700" fill="${c}">${t}</text>`;
+    d.innerHTML = `<svg viewBox="-50 -50 100 100" width="96" height="96" role="img" aria-label="Wind direction">
+      <circle r="37" fill="#fff" stroke="#10293a" stroke-width="1" opacity="0.95"/>${ticks}
+      ${lbl('N',0,-44,'#b8423a')}${lbl('E',44,0,'#10293a')}${lbl('S',0,44,'#10293a')}${lbl('W',-44,0,'#10293a')}
+      <g id="wr-arrow"><line x1="0" y1="24" x2="0" y2="-14" stroke="#f07f1e" stroke-width="5" stroke-linecap="round"/>
+        <path d="M0 -29 L10 -12 L-10 -12 Z" fill="#f07f1e" stroke="#fff" stroke-width="1.2" stroke-linejoin="round"/>
+        <circle cy="24" r="3.5" fill="#fff" stroke="#f07f1e" stroke-width="2"/></g>
+      <text id="wr-none" y="0" text-anchor="middle" dominant-baseline="central" font-size="10" fill="#5b7182" display="none">no wind</text>
+    </svg><div class="wr-txt" id="wr-txt"></div><div class="wr-sub" id="wr-sub"></div>`;
     return d; }});
-  new North().addTo(map);
+  new Rose().addTo(map);
+  L.control.zoom({position:'topleft'}).addTo(map);
   L.control.scale({imperial:false, position:'bottomleft'}).addTo(map);
+  const Legend = L.Control.extend({options:{position:'bottomright'}, onAdd(){
+    const d = L.DomUtil.create('div','legend');
+    L.DomEvent.disableClickPropagation(d);
+    d.innerHTML = `<div><span class="sw" style="background:rgb(56,126,168)"></span>Rideable water: lagoon + intertidal beach</div>
+      <div><span class="sw" style="background:rgba(56,126,168,.28)"></span>Open sea and isolated dune ponds — drawn, not counted</div>
+      <div><span class="sw" style="background:none;border:2px dashed var(--buoy)"></span>Lagoon outline used for the numbers</div>`;
+    return d; }});
+  new Legend().addTo(map);
 
   overlay = L.imageOverlay(D.frames[0].png, D.bounds, {opacity:0.85}).addTo(map);
   L.polygon(D.lagoon, {color:'#f07f1e', weight:2, dashArray:'6 5', fill:false}).addTo(map);
@@ -154,6 +203,7 @@ function drawQuiver(f){
     $('q-range-'+i).textContent = k.range[0]+'–'+k.range[1];
     const flag = $('q-flag-'+i); flag.innerHTML = '';
     if (k.estimated) flag.innerHTML += '<span class="q-est" title="No manufacturer chart found; range estimated from the size formula">e</span>';
+    if (k.exempt) flag.innerHTML += `<span class="q-est" title="Storm kite: allowed past your ${D.rider.skill_ceiling_kn} kn ceiling">storm</span>`;
     if (k.capped) flag.innerHTML += `<span class="q-est" title="Top of the range capped at your ${D.rider.skill_ceiling_kn} kn ceiling">cap</span>`;
   });
   $('quiverConclusion').textContent = f.quiver.conclusion;
@@ -171,13 +221,36 @@ function initWindows(){
       <div class="win-detail">${w.detail}</div></div>`).join('') +
     (D.windows_caveat ? `<div class="win-detail">${D.windows_caveat}</div>` : '');
 }
+// When each input was last pulled or captured, so a stale one is visible
+// instead of silently feeding the numbers above.
+function initSources(){
+  $('sources').innerHTML = D.sources.map(s=>`<div class="src${s.stale?' stale':''}">
+    <div class="src-name">${s.name}</div><div class="src-when">${s.when}</div>
+    <div class="src-detail">${s.detail}</div><div class="src-age">${s.age}</div></div>`).join('');
+}
 function initTides(){
   if (!D.tides.length){ $('tides').innerHTML = ''; return; }
   $('tides').innerHTML = D.tides.map(t=>
     `<tr><td class="kind">${t.kind}</td><td>${t.when}</td><td>${t.level}</td></tr>`).join('');
 }
+const COMPASS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+function drawRose(f){
+  const arrow = $('wr-arrow');
+  if (!arrow) return;  // map failed to load
+  const none = f.wind_deg == null;
+  arrow.setAttribute('display', none ? 'none' : 'inline');
+  $('wr-none').setAttribute('display', none ? 'inline' : 'none');
+  if (none){ $('wr-txt').textContent = '—'; $('wr-sub').textContent = ''; return; }
+  const to = (f.wind_deg + 180) % 360;
+  arrow.setAttribute('transform', `rotate(${to})`);
+  const from = COMPASS[Math.round(f.wind_deg/22.5) % 16], dest = COMPASS[Math.round(to/22.5) % 16];
+  $('wr-txt').textContent = `${Math.round(f.wind_kn)}–${Math.round(f.gust_kn)} kn`;
+  $('wr-sub').textContent = `from ${from} → ${dest}`;
+  $('windrose').title = `Wind from ${from} (${Math.round(f.wind_deg)}°), blowing towards ${dest}`;
+}
 function draw(i){
   const f = D.frames[i];
+  drawRose(f);
   if (overlay) overlay.setUrl(f.png);
   $('time').textContent = f.time; $('day').textContent = f.day + (f.dark ? ' · dark' : '');
   $('sea').textContent = f.sea.toFixed(2)+' m NAP';
@@ -233,14 +306,25 @@ function chart(sel){
 // from plus their spread, rather than a flat line pretending to be a forecast.
 function obschart(){
   const o = D.lagoon_obs;
-  if (!o || !o.times.length){ $('obschart').innerHTML = ''; $('lagoonObsLabel').textContent=''; return; }
+  if (!o || !o.times.length){ $('obswrap').style.display = 'none'; $('lagoonObsLabel').textContent=''; return; }
   $('lagoonObsLabel').textContent = o.label;
   const W=300, H=90, pad=8;
   const t0 = Math.min(...o.times), t1 = Math.max(...o.times);
   const amax = Math.max(...o.areas, o.hi)*1.1;
   const x = t => pad + (t-t0)*(W-2*pad)/Math.max(1,t1-t0);
   const y = a => H-pad-(H-2*pad)*a/amax;
-  let s = `<rect x="${pad}" y="${y(o.hi)}" width="${W-2*pad}" height="${Math.max(1,y(o.lo)-y(o.hi))}" fill="#b9d8e4" opacity="0.5"/>`;
+  // y gridlines every 1 or 2 ha, labelled in HTML beside the plot: text
+  // inside this stretched (preserveAspectRatio=none) SVG would be distorted
+  const step = amax > 5 ? 2 : 1;
+  let s = '', ticks = '';
+  for (let a = 0; a <= amax; a += step){
+    s += `<line x1="${pad}" y1="${y(a)}" x2="${W-pad}" y2="${y(a)}" stroke="#d5dee4" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
+    ticks += `<span style="top:${y(a)/H*100}%">${a}</span>`;
+  }
+  $('obsYticks').innerHTML = ticks;
+  const fmt = t => new Date(t*1000).toLocaleDateString('en-GB', {month:'short', year:'numeric'});
+  $('obsX0').textContent = fmt(t0); $('obsX1').textContent = fmt(t1);
+  s += `<rect x="${pad}" y="${y(o.hi)}" width="${W-2*pad}" height="${Math.max(1,y(o.lo)-y(o.hi))}" fill="#b9d8e4" opacity="0.5"/>`;
   s += `<line x1="${pad}" y1="${y(o.median)}" x2="${W-pad}" y2="${y(o.median)}" stroke="#10293a" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`;
   o.times.forEach((t,i)=>{
     const used = o.used[i];
@@ -253,6 +337,7 @@ $('t0').textContent = D.frames[0].time; $('t1').textContent = D.frames[D.frames.
 initQuiver();
 initWindows();
 initTides();
+initSources();
 obschart();
 draw(0);
 </script></body></html>

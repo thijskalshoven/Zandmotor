@@ -87,12 +87,18 @@ CFG = {
     # instead used to hand out a 7 m good to 37 kn.
     # No manufacturer chart could be found for the 2014 Drifter 7m, so its
     # range is estimated from that same formula instead of a real chart -
-    # treat it as the roughest of the three and adjust once you've flown it.
+    # treat it as the roughest of the lot and adjust once you've flown it.
     # Every range top is then capped at skill_ceiling_kn: what a kite can
     # technically hold and what you want to be out in are different numbers.
+    # exempt_from_ceiling opts one kite out of that cap: the 4.5m Drifter only
+    # makes sense above 28 kn, so capping it there left it a 28-28 kn range that
+    # was never picked. Hours where only it fits come out as "maybe", not "go".
     "rider": {"weight_kg": 88, "height_cm": 192, "board": "North Prime 141x41",
               "skill_ceiling_kn": 28},
     "quiver": [
+        {"name": "Drifter", "brand": "Cabrinha", "size_m2": 4.5, "color": "Orange/yellow",
+         "year": 2017, "image": "Drifter 4,5.jpg", "wind_range_75kg": (28, 40),
+         "exempt_from_ceiling": True},
         {"name": "Drifter", "brand": "Cabrinha", "size_m2": 7, "color": "Orange",
          "year": 2014, "image": "Drifter 7.png", "wind_range_75kg": None},
         {"name": "Switchblade", "brand": "Cabrinha", "size_m2": 10, "color": "Green",
@@ -105,7 +111,7 @@ CFG = {
                                              # retina and no more. The full-size originals
                                              # were 3.4 MB of a 4.6 MB output file.
     "kite_est_range_frac": 0.25,             # +/- this around the formula centre when no
-                                             # manufacturer chart exists (the Drifter)
+                                             # manufacturer chart exists (the Drifter 7m)
     "kite_marginal_frac": 0.15,              # how far outside its range a kite is still
                                              # "marginal" rather than "off"
 
@@ -171,6 +177,8 @@ CFG = {
     "lake_recent_days": 45,                 # prefer observations this recent
     "lake_min_obs": 3,                      # widen the window until at least this many
     "lake_min_plausible_ha": 0.3,           # below this, treat as failed detection
+    "lagoon_obs_stale_days": 14,            # warn when the newest satellite image of the
+                                             # lagoon is older than this (run --calibrate)
     "dem_max_age_days": 180,                # warn when the cached AHN tile is older
     "flats_dry_cache_keep_days": 7,         # prune older per-day dry-override caches
     "flats_dry_days_back": 30,              # how recent an image must be for the

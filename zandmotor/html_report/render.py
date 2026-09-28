@@ -13,7 +13,7 @@ _TEMPLATE_PATH = Path(__file__).resolve().parent / "template.html"
 
 
 def write_html(path, frames, grid, lagoon_ring, location, terrain_note, warnings, terrain_uri,
-               windows, tides, lagoon_obs, lagoon_label):
+               windows, tides, lagoon_obs, lagoon_label, sources):
     template = _TEMPLATE_PATH.read_text(encoding="utf-8")
     lats = [p[1] for p in lagoon_ring]
     lons = [p[0] for p in lagoon_ring]
@@ -27,7 +27,8 @@ def write_html(path, frames, grid, lagoon_ring, location, terrain_note, warnings
             "min_rideable_ha": CFG["min_rideable_ha"],
             "windows": windows["list"], "windows_none": windows["none"],
             "windows_caveat": windows["caveat"],
-            "tides": tides, "lagoon_obs": lagoon_obs, "lagoon_label": lagoon_label}
+            "tides": tides, "lagoon_obs": lagoon_obs, "lagoon_label": lagoon_label,
+            "sources": sources}
     warn_html = "".join(f'<div class="warn">{w}</div>' for w in warnings)
     html = (template
             .replace("__DATA__", json.dumps(data))

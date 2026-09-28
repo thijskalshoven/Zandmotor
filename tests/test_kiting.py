@@ -1,3 +1,4 @@
+from zandmotor.config import CFG
 from zandmotor.kiting import kite_advice, kite_wind_range, quiver_advice
 
 
@@ -54,3 +55,37 @@ def test_kite_advice_not_enough_water_is_no():
     wind_txt, verdict, notes = kite_advice(w, 0.5, quiver)
     assert verdict == "no"
     assert any("largest patch" in n for n in notes)
+
+
+def test_kite_wind_range_exempt_kite_ignores_ceiling():
+    kite = {"wind_range_75kg": (28, 40), "size_m2": 4.5, "exempt_from_ceiling": True}
+    rider = {"weight_kg": 75, "skill_ceiling_kn": 28}
+    lo, hi, estimated, capped = kite_wind_range(kite, rider)
+    assert not capped
+    assert lo == 28 and hi == 40
+
+
+def test_quiver_advice_exempt_kite_rides_past_ceiling(monkeypatch):
+    monkeypatch.setitem(CFG, "quiver", [
+        {"name": "Drifter", "size_m2": 4.5, "wind_range_75kg": (28, 40), "exempt_from_ceiling": True},
+        {"name": "Switchblade", "size_m2": 10, "wind_range_75kg": (11, 25)},
+    ])
+    rider = {"weight_kg": 75, "skill_ceiling_kn": 28}
+    result = quiver_advice((32.0, 36.0, 270.0, 15.0), rider)
+    assert result["best"] == "Drifter"
+    assert result["past_ceiling"] and not result["over_ceiling"]
+    # rideable, but a storm day is never a plain "go"
+    wind_txt, verdict, notes = kite_advice((32.0, 36.0, 270.0, 15.0), 5.0, result)
+    assert verdict == "maybe"
+    assert any("storm kite only" in n for n in notes)
+
+
+def test_quiver_advice_past_ceiling_without_exempt_kite_is_no(monkeypatch):
+    monkeypatch.setitem(CFG, "quiver", [
+        {"name": "Switchblade", "size_m2": 10, "wind_range_75kg": (11, 25)},
+    ])
+    rider = {"weight_kg": 75, "skill_ceiling_kn": 28}
+    result = quiver_advice((32.0, 36.0, 270.0, 15.0), rider)
+    assert result["over_ceiling"]
+    wind_txt, verdict, notes = kite_advice((32.0, 36.0, 270.0, 15.0), 5.0, result)
+    assert verdict == "no"

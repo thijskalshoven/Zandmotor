@@ -40,6 +40,10 @@ def kite_advice(w, usable_ha, quiver):
         notes.append(quiver["conclusion"].lower())
     if quiver.get("over_ceiling"):
         notes.append(f"gusts past your {CFG['rider']['skill_ceiling_kn']:.0f} kn ceiling")
+    elif quiver.get("past_ceiling"):
+        # a ceiling-exempt kite fits: rideable, but never a plain "go"
+        notes.append(f"gusts past your {CFG['rider']['skill_ceiling_kn']:.0f} kn ceiling, "
+                     "storm kite only")
     if dir_cls == "offshore":
         notes.append("offshore wind, gusty over the dunes")
     if gst - spd >= CFG["gusty_delta_kn"]:
@@ -90,7 +94,9 @@ def kite_wind_range(kite, rider):
     formula-estimated 7 m into "good to 37 kn".
 
     The top is then capped at skill_ceiling_kn - what a kite can technically
-    hold and what you want to be out in are different numbers.
+    hold and what you want to be out in are different numbers - unless the
+    kite is marked exempt_from_ceiling (a storm kite that only makes sense
+    above it).
     Returns (lo, hi, estimated, capped)."""
     if kite["wind_range_75kg"] is not None:
         lo75, hi75 = kite["wind_range_75kg"]
@@ -104,7 +110,7 @@ def kite_wind_range(kite, rider):
     centre = (lo75 + hi75) / 2 * rider["weight_kg"] / 75.0
     lo, hi = max(centre - half, 0.0), centre + half
     ceiling = rider.get("skill_ceiling_kn")
-    capped = ceiling is not None and hi > ceiling
+    capped = ceiling is not None and hi > ceiling and not kite.get("exempt_from_ceiling")
     if capped:
         hi = float(ceiling)
     return min(lo, hi), hi, estimated, capped
@@ -121,28 +127,31 @@ def quiver_advice(w, rider):
 
     A kite is "ideal" when the wind sits inside its range, "marginal" within a
     further kite_marginal_frac buffer, else "off". The buffer never extends
-    past the skill ceiling - that bound is meant to be hard."""
+    past the skill ceiling - that bound is meant to be hard - except for a
+    kite marked exempt_from_ceiling. Gusts past the ceiling only rule the hour
+    out when no exempt kite fits them."""
     kites = []
     for k in CFG["quiver"]:
         lo, hi, estimated, capped = kite_wind_range(k, rider)
         kites.append({"name": k["name"], "size_m2": k["size_m2"],
                       "range": (round(lo, 1), round(hi, 1)),
-                      "estimated": estimated, "capped": capped})
+                      "estimated": estimated, "capped": capped,
+                      "exempt": bool(k.get("exempt_from_ceiling"))})
 
     if w is None:
         for k in kites:
             k["status"] = "off"
         return {"kites": kites, "best": None, "best_status": None,
-                "over_ceiling": False, "conclusion": "No wind data"}
+                "over_ceiling": False, "past_ceiling": False, "conclusion": "No wind data"}
 
     spd, gst = w[0], w[1]
     ceiling = rider.get("skill_ceiling_kn")
-    over_ceiling = ceiling is not None and gst > ceiling
+    past_ceiling = ceiling is not None and gst > ceiling
     m = CFG["kite_marginal_frac"]
     for k in kites:
         lo, hi = k["range"]
         hi_buf = hi * (1 + m)
-        if ceiling is not None:
+        if ceiling is not None and not k["exempt"]:
             hi_buf = min(hi_buf, float(ceiling))
         if lo <= spd and gst <= hi:
             k["status"] = "ideal"
@@ -153,6 +162,9 @@ def quiver_advice(w, rider):
 
     ideal = [k for k in kites if k["status"] == "ideal"]
     marginal = [k for k in kites if k["status"] == "marginal"]
+    # past the ceiling only exempt kites can still fit (every other range
+    # stops at it), so the hour is ruled out only if none of them do
+    over_ceiling = past_ceiling and not (ideal or marginal)
 
     def center_dist(k):
         lo, hi = k["range"]
@@ -176,11 +188,12 @@ def quiver_advice(w, rider):
             conclusion = (f"Gusting {gst:.0f} kn, past your {ceiling:.0f} kn ceiling — "
                           "not a day for any of them")
         elif spd < biggest["range"][0]:
-            conclusion = f"Too light for all three kites right now ({spd:.0f} kn)"
+            conclusion = f"Too light for all {len(kites)} kites right now ({spd:.0f} kn)"
         else:
-            conclusion = (f"Too strong for all three kites right now "
+            conclusion = (f"Too strong for all {len(kites)} kites right now "
                           f"({spd:.0f} kn gusting {gst:.0f})")
 
     return {"kites": kites, "best": best["name"] if best else None,
             "best_status": best_status, "over_ceiling": over_ceiling,
+            "past_ceiling": past_ceiling,
             "conclusion": conclusion}
