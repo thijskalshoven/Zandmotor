@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+cache/
+zandmotor_lagoon.html
+lagoon.geojson
+lagoon_outline_check.png
+demo_outline_check.png
+*.egg-info/
+build/
+dist/
