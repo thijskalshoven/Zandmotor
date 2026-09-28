@@ -12,6 +12,9 @@ from pyproj import Transformer
 
 from zandmotor.config import CFG, log
 
+WATER_COLOR = (56, 126, 168, 220)     # rideable: lagoon + intertidal beach
+SEA_COLOR = (56, 126, 168, 70)        # open sea: drawn, but never counted
+
 
 def terrain_rgb(z):
     """Colour the terrain: sea, wet sand, beach, dunes, with hillshade."""
@@ -75,3 +78,13 @@ def outline_preview(rgb, ring, grid, title, path):
     d.text((12, 6), title, fill=(16, 41, 58), font=small)
     img.save(path)
     log.info("Written %s", path.name)
+
+
+def class_png(rideable, sea):
+    """Two-tone water overlay: what counts as rideable in full colour, the
+    open sea in a paler tone. They used to be one mask summed into one
+    number, which let ~620 ha of North Sea stand in for a 2.8 ha lagoon."""
+    rgba = np.zeros(rideable.shape + (4,), "uint8")
+    rgba[sea] = SEA_COLOR
+    rgba[rideable] = WATER_COLOR
+    return png_uri(rgba)
