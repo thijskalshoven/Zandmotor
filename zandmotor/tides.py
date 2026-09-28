@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import datetime as dt
 import math
-import sys
 
 import numpy as np
 import requests
 
 from zandmotor.config import CFG, log
+from zandmotor.errors import HarmonicFitUnavailableError, NoWaterLevelDataError
 from zandmotor.time_utils import format_rws_datetime, parse_iso_datetime
 
 
@@ -78,7 +78,8 @@ class WaterLevel:
                 self.location = loc
                 break
         if self.location is None:
-            sys.exit("No water level data from Rijkswaterstaat.\n  " + "\n  ".join(errors))
+            raise NoWaterLevelDataError(
+                "No water level data from Rijkswaterstaat.\n  " + "\n  ".join(errors))
         log.info("Water level: %s (measured %d, forecast %d, astro %d points)",
                  self.location, len(self.meas[0]), len(self.fc[0]), len(self.astro[0]))
         self.surge_now = self._surge_now()
@@ -177,12 +178,14 @@ class WaterLevel:
             try:
                 import utide
             except ImportError:
-                sys.exit("No forecast or tide data available and utide is not installed "
-                         "(pip install utide).")
+                raise HarmonicFitUnavailableError(
+                    "No forecast or tide data available and utide is not installed "
+                    "(pip install utide).") from None
             tm, vm = rws_series(self.location, self.now - dt.timedelta(days=35), self.now,
                                 "meting")
             if len(tm) < 1000:
-                sys.exit("Not enough measured water levels for a harmonic fit.")
+                raise HarmonicFitUnavailableError(
+                    "Not enough measured water levels for a harmonic fit.")
             days = tm / 86400.0
             coef = utide.solve(days, vm, lat=52.05, method="ols", conf_int="none",
                                verbose=False)

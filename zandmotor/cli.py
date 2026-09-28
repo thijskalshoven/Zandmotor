@@ -16,6 +16,7 @@ import requests
 from rasterio.warp import Resampling
 
 from zandmotor.config import CACHE, CFG, HERE, TZ, UTC, log
+from zandmotor.errors import ZandmotorError
 from zandmotor.flood import (
     flats_wet_map, largest_patch_ha, remove_small_patches, rideable_at, rideable_curve,
 )
@@ -378,14 +379,17 @@ def main():
     CACHE.mkdir(exist_ok=True)
     prune_cache()
 
-    z, ring, lagoon, terrain_note = _load_terrain_and_outline(args, grid, now, warnings)
-    lagoon_model, freq, dry_override = _load_or_fit_lagoon_model(
-        args, grid, lagoon, ring, now, warnings)
-    frames, times, curve, water, wind, daylight, lagoon_obs, lagoon_label, lake_area = \
-        _build_frames(args, now, grid, z, lagoon, lagoon_model, freq, dry_override, warnings)
-    windows, tides = _search_windows_and_tides(now, water, wind, daylight, curve, lake_area, end)
-    _render(args, frames, grid, ring, water, terrain_note, warnings, z, windows, tides,
-           lagoon_obs, lagoon_label)
+    try:
+        z, ring, lagoon, terrain_note = _load_terrain_and_outline(args, grid, now, warnings)
+        lagoon_model, freq, dry_override = _load_or_fit_lagoon_model(
+            args, grid, lagoon, ring, now, warnings)
+        frames, times, curve, water, wind, daylight, lagoon_obs, lagoon_label, lake_area = \
+            _build_frames(args, now, grid, z, lagoon, lagoon_model, freq, dry_override, warnings)
+        windows, tides = _search_windows_and_tides(now, water, wind, daylight, curve, lake_area, end)
+        _render(args, frames, grid, ring, water, terrain_note, warnings, z, windows, tides,
+               lagoon_obs, lagoon_label)
+    except ZandmotorError as e:
+        sys.exit(str(e))
 
 
 if __name__ == "__main__":

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 import time
 
 import numpy as np
@@ -14,6 +13,7 @@ from scipy import ndimage
 from skimage.morphology import reconstruction
 
 from zandmotor.config import CACHE, CFG, log
+from zandmotor.errors import NoSeaFoundError, TerrainFetchError
 
 
 def _is_tiff(content: bytes) -> bool:
@@ -69,9 +69,10 @@ def fetch_ahn(grid) -> np.ndarray:
             except requests.RequestException as e:
                 log.debug("AHN request failed: %s", e)
         if content is None:
-            sys.exit("Could not download AHN terrain from PDOK. Check the coverage name "
-                     f"'{CFG['ahn_coverage']}' via {CFG['ahn_wcs']}?request=GetCapabilities"
-                     "&service=WCS, or set CFG['local_dem'] to a GeoTIFF you downloaded.")
+            raise TerrainFetchError(
+                "Could not download AHN terrain from PDOK. Check the coverage name "
+                f"'{CFG['ahn_coverage']}' via {CFG['ahn_wcs']}?request=GetCapabilities"
+                "&service=WCS, or set CFG['local_dem'] to a GeoTIFF you downloaded.")
         cache_file.write_bytes(content)
     # max, not bilinear: keep a low sand ridge's full height rather than
     # averaging it away, so the flood model doesn't leak through it
@@ -122,7 +123,7 @@ def spill_elevation(z):
     border[0, :] = border[-1, :] = border[:, 0] = border[:, -1] = True
     sea = border & (z < CFG["sea_seed_level"])
     if not sea.any():
-        sys.exit("No open sea found on the map edge; enlarge bbox_wgs84 seaward.")
+        raise NoSeaFoundError("No open sea found on the map edge; enlarge bbox_wgs84 seaward.")
     seed[sea] = z[sea]
     footprint = ndimage.generate_binary_structure(2, 1)
     return reconstruction(seed, z, method="erosion", footprint=footprint)
