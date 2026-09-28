@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zandmotor lagoon</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{--ink:#10293a;--muted:#5b7182;--line:#d5dee4;--paper:#fbfcfd;--go:#1f8a5b;--maybe:#d98b1c;--no:#b8423a;--buoy:#f07f1e}
+*{box-sizing:border-box}html,body{margin:0;height:100%;font-family:Barlow,system-ui,sans-serif;color:var(--ink);background:var(--paper)}
+.app{display:grid;grid-template-columns:minmax(300px,380px) 1fr;height:100%}
+#map{height:100%}
+aside{overflow-y:auto;padding:20px 22px;border-right:1px solid var(--line)}
+h1{font-family:"Barlow Semi Condensed",Barlow,sans-serif;font-size:26px;margin:0 0 2px;letter-spacing:.2px}
+.sub{color:var(--muted);font-size:14px;margin:0 0 18px}
+.time{font-family:"Barlow Semi Condensed",Barlow,sans-serif;font-size:48px;font-weight:700;line-height:1}
+.day{color:var(--muted);font-size:15px;margin-top:2px}
+input[type=range]{width:100%;margin:16px 0 4px;accent-color:var(--buoy)}
+.ticks{display:flex;justify-content:space-between;color:var(--muted);font-size:12px}
+.verdict{margin:18px 0 6px;padding:12px 14px;border-radius:10px;color:#fff;font-weight:600;font-size:18px}
+.verdict.go{background:var(--go)}.verdict.maybe{background:var(--maybe)}.verdict.no{background:var(--no)}
+.notes{font-size:14px;color:var(--muted);min-height:18px}
+dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:16px 0;font-size:15px}
+dt{color:var(--muted)}dd{margin:0;font-weight:500;text-align:right}
+svg.chart{width:100%;height:120px;display:block;margin-top:6px}
+.legend{margin-top:16px;font-size:14px}
+.legend div{display:flex;align-items:center;gap:8px;margin:4px 0}
+.north{background:rgba(255,255,255,.9);border-radius:6px;padding:4px 6px 1px;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.sw{width:18px;height:12px;border-radius:3px;border:1px solid rgba(0,0,0,.12)}
+.fine{font-size:12px;color:var(--muted);margin-top:18px;line-height:1.45}
+.warn{background:#fff4e5;border:1px solid #f3d3a8;border-radius:8px;padding:8px 10px;font-size:13px;margin-bottom:14px}
+.quiver{margin-top:24px;padding-top:18px;border-top:1px solid var(--line)}
+.quiver h2{font-family:"Barlow Semi Condensed",Barlow,sans-serif;font-size:19px;margin:0 0 12px}
+.q-item{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}
+.q-item:last-of-type{border-bottom:none}
+.q-item img{width:56px;height:56px;object-fit:cover;border-radius:8px;background:var(--line);flex-shrink:0}
+.q-info{flex:1;min-width:0}
+.q-name{font-weight:600;font-size:15px}
+.q-range{color:var(--muted);font-size:13px}
+.q-badge{font-size:12px;font-weight:600;padding:4px 9px;border-radius:999px;color:#fff;white-space:nowrap}
+.q-badge.ideal{background:var(--go)}.q-badge.marginal{background:var(--maybe)}.q-badge.off{background:var(--muted)}
+.q-conclusion{margin-top:12px;padding:10px 14px;border-radius:10px;background:var(--paper);border:1px solid var(--line);font-weight:500;font-size:14px}
+.q-est{font-size:10px;font-weight:700;color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:0 3px;margin-left:4px}
+.windows{margin:10px 0 4px;font-size:14px}
+.windows h3{font-family:"Barlow Semi Condensed",Barlow,sans-serif;font-size:15px;margin:0 0 6px;color:var(--muted);font-weight:600;letter-spacing:.3px;text-transform:uppercase}
+.win{padding:7px 10px;border-radius:8px;border:1px solid var(--line);margin-bottom:5px;line-height:1.35}
+.win.go{border-left:4px solid var(--go)}.win.maybe{border-left:4px solid var(--maybe)}
+.win-when{font-weight:600}
+.win-detail{color:var(--muted);font-size:13px}
+.win-none{color:var(--muted);font-style:italic}
+table.tides{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0 2px}
+table.tides td{padding:2px 0;border-bottom:1px solid var(--line)}
+table.tides td:last-child{text-align:right;font-weight:500}
+table.tides td.kind{color:var(--muted);width:42%}
+@media (max-width:760px){html,body{height:auto}.app{display:flex;flex-direction:column;height:auto}#map{order:-1;height:55vh;position:sticky;top:0;z-index:1}aside{overflow:visible;border-right:0;border-top:1px solid var(--line);background:var(--paper);position:relative;z-index:2}}
+</style></head><body>
+<div class="app">
+<aside>
+  <h1>Zandmotor lagoon</h1>
+  <p class="sub">Generated __GENERATED__ from __LOCATION__ water levels</p>
+  __WARNINGS__
+  <div class="time" id="time"></div><div class="day" id="day"></div>
+  <input type="range" id="slider" min="0" max="__MAXI__" value="0" aria-label="Time">
+  <div class="ticks"><span id="t0"></span><span id="t1"></span></div>
+  <div class="verdict" id="verdict"></div><div class="notes" id="notes"></div>
+  <div class="windows" id="windows"></div>
+  <dl>
+    <dt>Sea level</dt><dd id="sea"></dd>
+    <dt>Lagoon water</dt><dd id="lag"></dd>
+    <dt>Beach shallows</dt><dd id="shal"></dd>
+    <dt>Rideable water</dt><dd id="ride"></dd>
+    <dt>Biggest patch</dt><dd id="patch"></dd>
+    <dt>Wind</dt><dd id="wind"></dd>
+    <dt>Water temp</dt><dd id="wtemp"></dd>
+    <dt>Wetsuit</dt><dd id="suit"></dd>
+  </dl>
+  <div class="notes" id="suitnote"></div>
+  <div class="sub" style="margin:0">Sea level (tide)</div>
+  <svg class="chart" id="tidechart" viewBox="0 0 300 60" preserveAspectRatio="none"></svg>
+  <table class="tides" id="tides"></table>
+  <div class="sub" style="margin:8px 0 0">Rideable water: lagoon + intertidal beach (bars)</div>
+  <svg class="chart" id="chart" viewBox="0 0 300 120" preserveAspectRatio="none"></svg>
+  <div class="sub" id="lagoonObsLabel" style="margin:8px 0 0"></div>
+  <svg class="chart" id="obschart" viewBox="0 0 300 90" preserveAspectRatio="none"></svg>
+  <div class="legend">
+    <div><span class="sw" style="background:rgb(56,126,168)"></span>Rideable water: lagoon + intertidal beach</div>
+    <div><span class="sw" style="background:rgba(56,126,168,.28)"></span>Open sea and isolated dune ponds — drawn, not counted</div>
+    <div><span class="sw" style="background:none;border:2px dashed var(--buoy)"></span>Lagoon outline used for the numbers</div>
+  </div>
+  <div class="quiver">
+    <h2>My kite quiver</h2>
+    <div id="quiverList"></div>
+    <div class="q-conclusion" id="quiverConclusion"></div>
+    <p class="fine" style="margin-top:8px">Ranges for <span id="riderInfo"></span>: manufacturer 75&nbsp;kg charts
+    shifted by weight (width kept), capped at your <span id="ceilingInfo"></span>&nbsp;kn ceiling. Upper limits are
+    tested against the gust, not the mean. <b>e</b> = estimated, no chart found. A starting point, not gospel.</p>
+  </div>
+  <p class="fine">Water level source per hour: <span id="src"></span>. Terrain: __TERRAIN__.
+  Areas cover the lagoon and the intertidal beach only &mdash; the open sea is drawn but never counted.
+  Model estimate, not a safety tool. Check conditions and local kite zones on the spot.</p>
+</aside>
+<div id="map"></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const D = __DATA__;
+let overlay = null;
+try {
+  const map = L.map('map', {zoomControl:true});
+  const aerial = L.tileLayer('https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_orthoHR/EPSG:3857/{z}/{x}/{y}.jpeg',
+    {maxZoom:19, attribution:'Luchtfoto &copy; PDOK'});
+  const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    {maxZoom:19, attribution:'&copy; OpenStreetMap'});
+  map.createPane('terrainPane').style.zIndex = 350;
+  const terrain = L.imageOverlay(D.terrain, D.bounds, {pane:'terrainPane'});
+  const bases = {'Aerial photo':aerial, 'Map':osm, 'Terrain model (sea, beach, dunes)':terrain};
+  const pick = new URLSearchParams(location.search).get('base');
+  (pick === 'terrain' ? terrain : pick === 'map' ? osm : aerial).addTo(map);
+  L.control.layers(bases, null, {position:'topright'}).addTo(map);
+  // lagoon plus the sea and dunes around it (whole modelled area on the terrain view)
+  map.fitBounds(pick === 'terrain' ? D.bounds : L.latLngBounds(D.lagoon_bounds).pad(1.2));
+  const North = L.Control.extend({options:{position:'topright'}, onAdd(){
+    const d = L.DomUtil.create('div','north'); d.title = 'North is up';
+    d.innerHTML = '<svg viewBox="0 0 24 38" width="24" height="38" aria-label="North"><path d="M12 2 L20 25 L12 19 L4 25 Z" fill="#10293a" stroke="#fff" stroke-width="1.5"/><text x="12" y="36" text-anchor="middle" font-family="Barlow,sans-serif" font-size="11" font-weight="700" fill="#10293a">N</text></svg>';
+    return d; }});
+  new North().addTo(map);
+  L.control.scale({imperial:false, position:'bottomleft'}).addTo(map);
+
+  overlay = L.imageOverlay(D.frames[0].png, D.bounds, {opacity:0.85}).addTo(map);
+  L.polygon(D.lagoon, {color:'#f07f1e', weight:2, dashArray:'6 5', fill:false}).addTo(map);
+} catch (e) {
+  document.getElementById('map').innerHTML = '<p style="padding:20px">The map could not load (no internet?). The numbers on the left still work.</p>';
+}
+const $ = id => document.getElementById(id);
+const words = {go:'Looks rideable', maybe:'Rideable, with caveats', no:'Not rideable'};
+const qWords = {ideal:'Ideal', marginal:'Marginal', off:'Not this one'};
+function initQuiver(){
+  $('riderInfo').textContent = `${D.rider.weight_kg}kg, ${D.rider.height_cm}cm on a ${D.rider.board}`;
+  $('ceilingInfo').textContent = D.rider.skill_ceiling_kn;
+  $('quiverList').innerHTML = D.quiver_meta.map((k,i)=>`
+    <div class="q-item">
+      <img src="${k.image}" alt="${k.brand} ${k.name} ${k.size_m2}m²">
+      <div class="q-info">
+        <div class="q-name">${k.size_m2}m² ${k.brand} ${k.name}</div>
+        <div class="q-range">${k.color}, ${k.year} &middot; <span id="q-range-${i}"></span> kn<span id="q-flag-${i}"></span></div>
+      </div>
+      <span class="q-badge" id="q-badge-${i}"></span>
+    </div>`).join('');
+}
+function drawQuiver(f){
+  f.quiver.kites.forEach((k,i)=>{
+    const b = $('q-badge-'+i);
+    b.className = 'q-badge '+k.status; b.textContent = qWords[k.status];
+    $('q-range-'+i).textContent = k.range[0]+'–'+k.range[1];
+    const flag = $('q-flag-'+i); flag.innerHTML = '';
+    if (k.estimated) flag.innerHTML += '<span class="q-est" title="No manufacturer chart found; range estimated from the size formula">e</span>';
+    if (k.capped) flag.innerHTML += `<span class="q-est" title="Top of the range capped at your ${D.rider.skill_ceiling_kn} kn ceiling">cap</span>`;
+  });
+  $('quiverConclusion').textContent = f.quiver.conclusion;
+}
+// Rideable windows across the whole wind forecast, not just the slider range.
+// Most hours are "no", so this is usually the only part worth reading.
+function initWindows(){
+  const el = $('windows');
+  if (!D.windows.length){
+    el.innerHTML = '<h3>Next rideable window</h3><div class="win-none">'+D.windows_none+'</div>';
+    return;
+  }
+  el.innerHTML = '<h3>Next rideable window'+(D.windows.length>1?'s':'')+'</h3>' +
+    D.windows.map(w=>`<div class="win ${w.verdict}"><div class="win-when">${w.when}</div>
+      <div class="win-detail">${w.detail}</div></div>`).join('') +
+    (D.windows_caveat ? `<div class="win-detail">${D.windows_caveat}</div>` : '');
+}
+function initTides(){
+  if (!D.tides.length){ $('tides').innerHTML = ''; return; }
+  $('tides').innerHTML = D.tides.map(t=>
+    `<tr><td class="kind">${t.kind}</td><td>${t.when}</td><td>${t.level}</td></tr>`).join('');
+}
+function draw(i){
+  const f = D.frames[i];
+  if (overlay) overlay.setUrl(f.png);
+  $('time').textContent = f.time; $('day').textContent = f.day + (f.dark ? ' · dark' : '');
+  $('sea').textContent = f.sea.toFixed(2)+' m NAP';
+  // lake mode reports one measured value with its spread for the whole run;
+  // the tidal/wind modes vary per hour, so fall back to this frame's value
+  $('lag').textContent = D.lagoon_label || (f.lagoon_ha.toFixed(1)+' ha');
+  $('shal').textContent = f.shallows_ha.toFixed(1)+' ha';
+  $('ride').textContent = f.rideable_ha.toFixed(1)+' ha';
+  // the largest connected patch is what the verdict actually tests against
+  $('patch').textContent = f.usable_ha.toFixed(1)+' ha';
+  $('wind').textContent = f.wind;
+  $('wtemp').textContent = f.water_c == null ? '—' : f.water_c.toFixed(1)+' °C';
+  $('suit').textContent = f.wetsuit || '—';
+  $('suitnote').textContent = f.wetsuit_note || '';
+  const v = $('verdict'); v.className = 'verdict '+f.verdict; v.textContent = words[f.verdict];
+  $('notes').textContent = f.notes.length ? f.notes.join(', ') : '';
+  $('src').textContent = f.src;
+  drawQuiver(f);
+  tidechart(i);
+  chart(i);
+}
+function tidechart(sel){
+  const n = D.frames.length, W=300, H=60, pad=6;
+  const sv = D.frames.map(f=>f.sea);
+  const smin = Math.min(...sv,0)-0.1, smax = Math.max(...sv,0)+0.1;
+  const x = i => pad + i*(W-2*pad)/Math.max(1,n-1);
+  const y = v => H-pad-(H-2*pad)*(v-smin)/(smax-smin);
+  const pts = sv.map((v,i)=>`${x(i)},${y(v)}`).join(' ');
+  let s = `<line x1="${pad}" y1="${y(0)}" x2="${W-pad}" y2="${y(0)}" stroke="#d5dee4" stroke-width="1" stroke-dasharray="3 2" vector-effect="non-scaling-stroke"/>`;
+  s += `<polyline points="${pts}" fill="none" stroke="#2f7fb8" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+  s += `<line x1="${x(sel)}" y1="${pad}" x2="${x(sel)}" y2="${H-pad}" stroke="#f07f1e" stroke-width="1" stroke-dasharray="2 2" opacity="0.6" vector-effect="non-scaling-stroke"/>`;
+  s += `<circle cx="${x(sel)}" cy="${y(sv[sel])}" r="4" fill="#f07f1e" stroke="#fff" stroke-width="1.5"/>`;
+  $('tidechart').innerHTML = s;
+}
+function chart(sel){
+  const n = D.frames.length, W=300, H=120, pad=6;
+  const rd = D.frames.map(f=>f.rideable_ha), rmax = Math.max(1,...rd);
+  const x = i => pad + i*(W-2*pad)/Math.max(1,n-1);
+  const bw = Math.max(2,(W-2*pad)/n*0.6);
+  let s = '';
+  rd.forEach((r,i)=>{
+    const h=(H-2*pad)*r/rmax;
+    const fill = i==sel ? '#f07f1e' : (D.frames[i].dark ? '#e3eaee' : '#b9d8e4');
+    s+=`<rect x="${x(i)-bw/2}" y="${H-pad-h}" width="${bw}" height="${h}" fill="${fill}" rx="2"/>`;
+  });
+  // the threshold that decides "enough water to ride"
+  const ty = H-pad-(H-2*pad)*D.min_rideable_ha/rmax;
+  if (D.min_rideable_ha < rmax) s += `<line x1="${pad}" y1="${ty}" x2="${W-pad}" y2="${ty}" stroke="#b8423a" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>`;
+  $('chart').innerHTML = s;
+}
+// The lagoon's area is a MEASUREMENT, not a forecast: in lake mode nothing in
+// the record predicts it, so this plots the satellite observations it is drawn
+// from plus their spread, rather than a flat line pretending to be a forecast.
+function obschart(){
+  const o = D.lagoon_obs;
+  if (!o || !o.times.length){ $('obschart').innerHTML = ''; $('lagoonObsLabel').textContent=''; return; }
+  $('lagoonObsLabel').textContent = o.label;
+  const W=300, H=90, pad=8;
+  const t0 = Math.min(...o.times), t1 = Math.max(...o.times);
+  const amax = Math.max(...o.areas, o.hi)*1.1;
+  const x = t => pad + (t-t0)*(W-2*pad)/Math.max(1,t1-t0);
+  const y = a => H-pad-(H-2*pad)*a/amax;
+  let s = `<rect x="${pad}" y="${y(o.hi)}" width="${W-2*pad}" height="${Math.max(1,y(o.lo)-y(o.hi))}" fill="#b9d8e4" opacity="0.5"/>`;
+  s += `<line x1="${pad}" y1="${y(o.median)}" x2="${W-pad}" y2="${y(o.median)}" stroke="#10293a" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`;
+  o.times.forEach((t,i)=>{
+    const used = o.used[i];
+    s += `<circle cx="${x(t)}" cy="${y(o.areas[i])}" r="${used?2.6:2}" fill="${used?'#2f7fb8':'none'}" stroke="${used?'#fff':'#9db3c0'}" stroke-width="1"/>`;
+  });
+  $('obschart').innerHTML = s;
+}
+$('slider').addEventListener('input', e => draw(+e.target.value));
+$('t0').textContent = D.frames[0].time; $('t1').textContent = D.frames[D.frames.length-1].time;
+initQuiver();
+initWindows();
+initTides();
+obschart();
+draw(0);
+</script></body></html>
