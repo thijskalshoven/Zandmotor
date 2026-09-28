@@ -24,7 +24,7 @@ def prune_cache():
     """Drop the per-day dry-override masks once they're stale. One is written
     per run-day at ~640 KB and nothing ever removed them."""
     cutoff = time.time() - CFG["flats_dry_cache_keep_days"] * 86400
-    for f in CACHE.glob("flats_dry_*.npy"):
+    for f in CACHE.glob(CFG["flats_dry_cache_glob"]):
         if f.stat().st_mtime < cutoff:
             f.unlink()
             log.debug("Pruned stale cache file %s", f.name)
@@ -34,7 +34,7 @@ def dem_age_days():
     """Age of the cached AHN tile in days, or None if it isn't cached.
     Cached indefinitely, on a sand engine built to reshape - so the age is
     worth surfacing rather than assuming the terrain is current."""
-    f = CACHE / "ahn_dtm.tif"
+    f = CACHE / CFG["ahn_dtm_file"]
     if not f.exists():
         return None
     return (time.time() - f.stat().st_mtime) / 86400
@@ -43,7 +43,7 @@ def dem_age_days():
 def fetch_ahn(grid) -> np.ndarray:
     """Download AHN DTM for the grid area (cached) and put it on the grid."""
     CACHE.mkdir(exist_ok=True)
-    cache_file = CACHE / "ahn_dtm.tif"
+    cache_file = CACHE / CFG["ahn_dtm_file"]
     if not cache_file.exists():
         to_rd = Transformer.from_crs(3857, 28992, always_xy=True)
         x0, y0, x1, y1 = grid.bounds_3857

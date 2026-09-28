@@ -16,9 +16,17 @@ CFG = {
     "lagoon_hint": (4.1938, 52.0565),
     "outline_days_back": 60,               # search this far back for an image
     "outline_min_ha": 2.0,                 # ignore water bodies smaller than this
+    "outline_osm_url": "https://overpass-api.de/api/interpreter",
     # Last-resort placeholder outline (lon, lat), only used if nothing else works
     "lagoon_polygon": [(4.186, 52.055), (4.204, 52.055), (4.206, 52.064),
                        (4.190, 52.066), (4.186, 52.055)],
+
+    # Filenames (all relative to HERE, the project root)
+    "lagoon_geojson_file": "lagoon.geojson",
+    "outline_check_image_file": "lagoon_outline_check.png",
+    "ahn_dtm_file": "ahn_dtm.tif",           # relative to CACHE
+    "flats_dry_cache_glob": "flats_dry_*.npy",     # relative to CACHE
+    "flats_dry_cache_pattern": "flats_dry_{date}.npy",  # relative to CACHE
 
     # Terrain
     "ahn_wcs": "https://service.pdok.nl/rws/ahn/wcs/v1_0",
@@ -46,6 +54,11 @@ CFG = {
                "ONLINEWAARNEMINGENSERVICES/OphalenWaarnemingen",
     "rws_locations": ["scheveningen", "hoekvanholland"],
     "surge_decay_hours": 12.0,              # for astro + surge fallback
+
+    # Wind and sea temperature (Open-Meteo, free, no key)
+    "open_meteo_forecast_url": "https://api.open-meteo.com/v1/forecast",
+    "open_meteo_marine_url": "https://marine-api.open-meteo.com/v1/marine",
+    "open_meteo_archive_url": "https://archive-api.open-meteo.com/v1/archive",
 
     # Lagoon behaviour
     "lagoon_lag_min": 30,                   # lagoon level lags the sea by this

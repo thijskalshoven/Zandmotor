@@ -34,7 +34,7 @@ def flats_dry_override(grid, lagoon, now):
     to fix). Cells that are wet most of the time (the real lagoon, real
     canals) still won't qualify, since their wet count stays high.
     Cached per calendar day so a normal run doesn't refetch imagery."""
-    cache_file = CACHE / f"flats_dry_{now.date()}.npy"
+    cache_file = CACHE / CFG["flats_dry_cache_pattern"].format(date=now.date())
     if cache_file.exists():
         cached = np.load(cache_file)
         if cached.shape == lagoon.shape:

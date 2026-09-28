@@ -23,7 +23,7 @@ def fetch_wind(lat, lon, forecast_days=7):
               "wind_speed_unit": "kn", "timezone": "UTC", "past_days": 2,
               "forecast_days": forecast_days}
     try:
-        r = requests.get("https://api.open-meteo.com/v1/forecast", params=params, timeout=30)
+        r = requests.get(CFG["open_meteo_forecast_url"], params=params, timeout=30)
         r.raise_for_status()
         j = r.json()
         h = j["hourly"]
@@ -70,7 +70,7 @@ def fetch_sea_temp(lat, lon):
     Returns (times, temps_c) or None - a missing wetsuit line is a cosmetic
     loss, so this never aborts the run."""
     try:
-        r = requests.get("https://marine-api.open-meteo.com/v1/marine", params={
+        r = requests.get(CFG["open_meteo_marine_url"], params={
             "latitude": lat, "longitude": lon, "hourly": "sea_surface_temperature",
             "timezone": "UTC", "past_days": 1, "forecast_days": 7}, timeout=30)
         r.raise_for_status()
@@ -130,7 +130,7 @@ def shore_class(deg):
 def fetch_wind_history(lat, lon, start, end):
     """Hourly wind speed/gust archive (not forecast) for fitting against past
     satellite observations."""
-    r = requests.get("https://archive-api.open-meteo.com/v1/archive", params={
+    r = requests.get(CFG["open_meteo_archive_url"], params={
         "latitude": lat, "longitude": lon,
         "start_date": start.date().isoformat(), "end_date": end.date().isoformat(),
         "hourly": "wind_speed_10m,wind_gusts_10m", "wind_speed_unit": "kn",

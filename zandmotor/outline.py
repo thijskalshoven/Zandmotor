@@ -87,7 +87,7 @@ def save_outline(ring, props):
     gj = {"type": "FeatureCollection", "features": [{
         "type": "Feature", "properties": props,
         "geometry": {"type": "Polygon", "coordinates": [[list(p) for p in ring]]}}]}
-    (HERE / "lagoon.geojson").write_text(json.dumps(gj, indent=1))
+    (HERE / CFG["lagoon_geojson_file"]).write_text(json.dumps(gj, indent=1))
     log.info("Written lagoon.geojson (%s)", props.get("source"))
 
 
@@ -119,7 +119,7 @@ def outline_from_sentinel(grid, now):
         stretched = np.clip(rgb / 0.25 * 255, 0, 255).astype("uint8")
         title = (f"Sentinel-2 {t.astimezone(TZ):%d %b %Y %H:%M}, water {h:+.2f} m NAP, "
                  f"lagoon {m.sum() * grid.cell_area_m2 / 1e4:.1f} ha")
-        outline_preview(stretched, ring, grid, title, HERE / "lagoon_outline_check.png")
+        outline_preview(stretched, ring, grid, title, HERE / CFG["outline_check_image_file"])
         return ring, {"source": "sentinel-2", "image_time": t.isoformat(),
                       "water_level_m_nap": round(h, 2)}
     raise RuntimeError("no usable satellite image found (clouds or no lagoon detected)")
@@ -131,7 +131,7 @@ def outline_from_osm(grid):
     bb = f"({s_},{w_},{n_},{e_})"
     q = (f'[out:json][timeout:60];(way["natural"="water"]{bb};way["water"="lagoon"]{bb};'
          f'way["natural"="bay"]{bb};relation["natural"="water"]{bb};);out geom;')
-    r = requests.post("https://overpass-api.de/api/interpreter", data={"data": q}, timeout=90,
+    r = requests.post(CFG["outline_osm_url"], data={"data": q}, timeout=90,
                        headers={"User-Agent": "zandmotor-lagoon-nowcast/1.0 (kitesurf forecast tool)"})
     r.raise_for_status()
     to_merc = Transformer.from_crs(4326, 3857, always_xy=True)
@@ -186,6 +186,6 @@ def make_outline(grid, now, method, z=None):
         if z is not None:
             outline_preview(terrain_rgb(z), ring, grid,
                             f"OpenStreetMap outline on terrain model ({props.get('name') or 'lagoon'})",
-                            HERE / "lagoon_outline_check.png")
+                            HERE / CFG["outline_check_image_file"])
     save_outline(ring, props)
     return ring

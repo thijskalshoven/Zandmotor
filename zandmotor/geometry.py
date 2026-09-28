@@ -44,7 +44,7 @@ def make_grid(bbox, res_m) -> Grid:
 
 def load_lagoon_polygon():
     """Returns (ring, properties) from lagoon.geojson, or (None, None)."""
-    f = HERE / "lagoon.geojson"
+    f = HERE / CFG["lagoon_geojson_file"]
     if not f.exists():
         return None, None
     gj = json.loads(f.read_text())
