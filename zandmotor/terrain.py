@@ -12,7 +12,7 @@ from rasterio.warp import Resampling, reproject
 from scipy import ndimage
 from skimage.morphology import reconstruction
 
-from zandmotor.config import CACHE, CFG, log
+from zandmotor.config import CACHE, CFG, HERE, log
 from zandmotor.errors import NoSeaFoundError, TerrainFetchError
 
 
@@ -79,6 +79,31 @@ def fetch_ahn(grid) -> np.ndarray:
     return read_to_grid(cache_file, grid, resampling=Resampling.max)
 
 
+def overlay_coastal_dem(z, grid):
+    """`z` with CFG["coastal_dem"] laid over it wherever that survey has data.
+    Returns (heights, share of the map it covered), the share 0.0 when it is
+    switched off or missing.
+
+    AHN is a national survey years apart; the Zandmotor moves every season,
+    and what decides whether a surge reaches the lagoon is the sand ridge in
+    front of the basin and the basin floor. AHN has no return for much of
+    that floor (water when surveyed), so the model had to assume one level
+    there (basin_gap_fill_m); the 2026 coastal survey measures it.
+    Max-resampled like AHN, so a low ridge keeps its full height."""
+    name = CFG["coastal_dem"]
+    if not name:
+        return z, 0.0
+    f = HERE / name
+    if not f.exists():
+        log.warning("Coastal DTM %s not found; using AHN heights only.", name)
+        return z, 0.0
+    zc = read_to_grid(f, grid, resampling=Resampling.max)
+    use = np.isfinite(zc)
+    out = z.copy()
+    out[use] = zc[use]
+    return out, float(use.mean())
+
+
 def read_to_grid(path, grid, resampling=Resampling.bilinear) -> np.ndarray:
     with open(path, "rb") as f, MemoryFile(f.read()) as mem, mem.open() as src:
         data = src.read(1).astype("float32")
@@ -93,22 +118,32 @@ def read_to_grid(path, grid, resampling=Resampling.bilinear) -> np.ndarray:
     return out
 
 
-def prepare_terrain(z_raw, lagoon):
+def prepare_terrain(z_raw, lagoon, basin=None, gap_fill_m=None):
     """Fill terrain gaps for rendering. Missing data (offshore, or under the
     lagoon - AHN's laser can't see through water) gets a nominal
     "underwater" fill purely so the terrain layer has no holes; it's
     cosmetic only. The lagoon's bed elevation isn't modelled at all: only
     whether a spot is actually wet matters for kiting, not how deep, so
     wetness comes straight from satellite observations (see
-    wetness_frequency) instead of inferred bathymetry."""
+    wetness_frequency) instead of inferred bathymetry.
+
+    Gaps in the rest of the lagoon basin (see geometry.basin_mask) are not
+    cosmetic: they get basin_gap_fill_m, the basin floor, because the beach
+    flood model runs over them. They used to fall through to the 20 m "land"
+    fill, which walled the tide out of the basin - on 2026-11-12 at +1.65 m
+    NAP the map drew the water wrapping round a dry ring instead of flowing
+    back into the lagoon. gap_fill_m overrides basin_gap_fill_m (the
+    --calibrate fit tries several, see lagoon_model.fill_drain_fit)."""
     z = z_raw.copy()
     nod = ~np.isfinite(z)
+    basin = lagoon if basin is None else basin | lagoon
     lab, _ = ndimage.label(nod)
     edge = np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))
     edge = edge[edge > 0]
-    sea = np.isin(lab, edge) & ~lagoon
+    sea = np.isin(lab, edge) & ~basin
     z[sea] = CFG["sea_fill_level"]
     z[~np.isfinite(z) & lagoon] = CFG["sea_fill_level"]
+    z[~np.isfinite(z) & basin] = CFG["basin_gap_fill_m"] if gap_fill_m is None else gap_fill_m
     z[~np.isfinite(z)] = 20.0              # other gaps: treat as land
     return z
 

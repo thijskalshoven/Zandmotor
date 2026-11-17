@@ -12,10 +12,10 @@ from pyproj import Transformer
 from scipy import ndimage
 
 from zandmotor.config import CFG, HERE, TZ, log
-from zandmotor.geometry import mask_to_ring, polygon_mask
+from zandmotor.geometry import load_basin_polygon, mask_to_ring, polygon_mask
 from zandmotor.rendering import outline_preview, terrain_rgb
 from zandmotor.satellite.client import cdse_token
-from zandmotor.satellite.optical import cdse_image, cdse_scenes
+from zandmotor.satellite.optical import cdse_image, cdse_scenes, clear_mask
 from zandmotor.tides import WaterLevel
 
 
@@ -83,18 +83,46 @@ def pick_lagoon(cands, grid):
     return max(pool, key=lambda m: m.sum())
 
 
-def save_outline(ring, props):
+def _write_ring(name, ring, props):
     gj = {"type": "FeatureCollection", "features": [{
         "type": "Feature", "properties": props,
         "geometry": {"type": "Polygon", "coordinates": [[list(p) for p in ring]]}}]}
-    (HERE / CFG["lagoon_geojson_file"]).write_text(json.dumps(gj, indent=1))
+    (HERE / name).write_text(json.dumps(gj, indent=1))
+
+
+def save_outline(ring, props):
+    _write_ring(CFG["lagoon_geojson_file"], ring, props)
     log.info("Written lagoon.geojson (%s)", props.get("source"))
+
+
+def merge_into_basin(grid, ring, props):
+    """Grow lagoon_basin.geojson by a newly traced outline; it never shrinks.
+
+    --outline traces one image, and the lagoon in one image can be a third of
+    the lagoon at a fill (4.5 ha on 2026-11-05 against 13.4 ha on 2026-09-01).
+    The outline is what the numbers are measured over, so it follows the
+    latest trace; the basin keeps the largest extent ever traced, which is
+    what bounds the probable water edge. If Zandmotor reshapes so far that
+    the old basin is wrong, delete the file and re-run --outline."""
+    old, old_props = load_basin_polygon()
+    mask = polygon_mask(grid, ring)
+    if old is not None:
+        mask |= polygon_mask(grid, old)
+    sources = list((old_props or {}).get("from", []))
+    tag = props.get("image_time") or props.get("source")
+    if tag and tag not in sources:
+        sources.append(tag)
+    basin = mask_to_ring(mask, grid)
+    _write_ring(CFG["lagoon_basin_file"], basin, {"source": "max extent", "from": sources})
+    log.info("Lagoon basin now %.1f ha (%s)", polygon_mask(grid, basin).sum()
+             * grid.cell_area_m2 / 1e4, CFG["lagoon_basin_file"])
 
 
 def outline_from_sentinel(grid, now):
     token = cdse_token()
     days = CFG["outline_days_back"]
-    scenes = cdse_scenes(token, now, days_back=days, max_scenes=40)
+    scenes = cdse_scenes(token, now, days_back=days, max_scenes=40,
+                         max_cloud=CFG["sat_max_cloud_full_scene"])
     if not scenes:
         raise RuntimeError(f"no cloud-free Sentinel-2 images in the last {days} days")
     wl = WaterLevel(now, now, history_days=days + 2)
@@ -108,7 +136,7 @@ def outline_from_sentinel(grid, now):
     for h, t in ranked[:6]:
         log.info("Trying image %s (water level %.2f m NAP)", t.strftime("%Y-%m-%d %H:%M"), h)
         ndwi, scl, rgb = cdse_image(token, grid, t)
-        clear = np.isin(scl.round(), [4, 5, 6, 7, 11])
+        clear = clear_mask(scl)
         if clear.mean() < 0.8:
             log.info("  too cloudy over the area, next")
             continue
@@ -175,7 +203,8 @@ def outline_from_osm(grid):
 
 
 def make_outline(grid, now, method, z=None):
-    """Returns (ring, props). Writes lagoon.geojson and a check image."""
+    """Returns the ring. Writes lagoon.geojson and a check image, and grows
+    lagoon_basin.geojson (see merge_into_basin)."""
     if method == "auto":
         method = "sentinel" if os.environ.get("CDSE_CLIENT_ID") else "osm"
     log.info("Tracing lagoon outline (%s)...", method)
@@ -188,4 +217,5 @@ def make_outline(grid, now, method, z=None):
                             f"OpenStreetMap outline on terrain model ({props.get('name') or 'lagoon'})",
                             HERE / CFG["outline_check_image_file"])
     save_outline(ring, props)
+    merge_into_basin(grid, ring, props)
     return ring

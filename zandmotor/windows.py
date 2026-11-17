@@ -12,32 +12,31 @@ from zandmotor.flood import rideable_at
 from zandmotor.wind import compass, is_daylight
 
 
-def find_windows(now, water, wind, curve, daylight, max_windows=3, step_min=60):
+def find_windows(now, lagoon_water, wind, daylight, until, max_windows=3, step_min=60):
     """Runs of consecutive daylight hours whose verdict is go or maybe.
 
     This is the question the tool is actually for: most hours are "no", so an
-    8-hour slider showing thirteen refusals answers nothing. Searches the whole
-    wind forecast horizon.
+    8-hour slider showing thirteen refusals answers nothing. Searches the wind
+    forecast horizon, up to `until` (epoch).
 
     Caveat worth remembering when reading the output: with the lagoon in lake
-    mode its area is a constant, so what varies across the week is wind, tide
-    (via the intertidal strip) and daylight - not the lagoon."""
+    mode its area is a constant, so what varies across the week is wind and
+    daylight - not the lagoon, and no longer the tide either (the wet beach is
+    drawn but not counted)."""
     if wind is None:
         return []
-    t_end = min(float(wind[0][-1]), water.covers_until())
+    t_end = min(float(wind[0][-1]), until)
     windows, cur = [], None
     te = now.timestamp()
     while te <= t_end:
         ok = is_daylight(daylight, te)
         if ok:
-            _, _, w, quiver, verdict, _, _, _ = rideable_at(te, water, wind, curve)
+            _, _, w, quiver, verdict, _, _, _ = rideable_at(te, lagoon_water, wind)
             ok = verdict in ("go", "maybe")
         if ok:
             if cur is None:
                 cur = {"start": te, "end": te, "verdict": verdict,
-                       "kite": quiver["best"], "size": next(
-                           (k["size_m2"] for k in quiver["kites"]
-                            if k["name"] == quiver["best"]), None),
+                       "kite": quiver["best"], "size": quiver["best_size_m2"],
                        "spd": [w[0]], "gst": [w[1]], "deg": [w[2]]}
             else:
                 cur["end"] = te

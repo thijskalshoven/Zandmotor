@@ -23,3 +23,10 @@ class NoWaterLevelDataError(ZandmotorError):
 class HarmonicFitUnavailableError(ZandmotorError):
     """The harmonic-tide fallback can't run (utide missing, or not enough
     measured data to fit it)."""
+
+
+class CalibrationIncompleteError(ZandmotorError):
+    """Too many satellite requests failed during --calibrate to trust the
+    record. Raised instead of fitting on what little arrived, so the cached
+    model is left untouched: a run whose token expired mid-way once fitted a
+    "wind" model on 9 images and overwrote a year-long record."""

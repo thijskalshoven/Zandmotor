@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import math
 
 import numpy as np
@@ -10,6 +11,7 @@ import requests
 
 from zandmotor.config import CFG, log
 from zandmotor.errors import HarmonicFitUnavailableError, NoWaterLevelDataError
+from zandmotor.http_utils import post_with_deadline
 from zandmotor.time_utils import format_rws_datetime, parse_iso_datetime
 
 
@@ -24,16 +26,17 @@ def rws_series(location, start, end, proces):
                 "AquoPlusWaarnemingMetadata": {"AquoMetadata": aquo},
                 "Periode": {"Begindatumtijd": format_rws_datetime(start),
                             "Einddatumtijd": format_rws_datetime(end)}}
-        return requests.post(CFG["rws_url"], json=body, timeout=90)
+        return post_with_deadline(CFG["rws_url"], CFG["rws_request_deadline_s"], idle_s=60,
+                                  json=body)
 
-    resp = request(True)
-    if resp.status_code == 400:
-        resp = request(False)              # filter on the response instead
-    if resp.status_code == 204 or not resp.content:
+    status, content = request(True)
+    if status == 400:
+        status, content = request(False)   # filter on the response instead
+    if status == 204 or not content:
         return np.array([]), np.array([])
-    if not resp.ok:
-        raise RuntimeError(f"RWS {resp.status_code}: {resp.text[:200]}")
-    data = resp.json()
+    if not 200 <= status < 300:
+        raise RuntimeError(f"RWS {status}: {content[:200].decode('utf-8', 'replace')}")
+    data = json.loads(content)
     pts = {}
     for wl in data.get("WaarnemingenLijst") or []:
         meta = wl.get("AquoMetadata") or {}
@@ -54,6 +57,35 @@ def rws_series(location, start, end, proces):
         return np.array([]), np.array([])
     t = np.array(sorted(pts))
     return t, np.array([pts[k] for k in t])
+
+
+def rws_series_long(location, start, end, proces, chunk_days=60, attempts=3):
+    """rws_series over a long span, in chunks with retries.
+
+    A year of 10-minute data in one request (~52,000 values) can trickle in
+    for half an hour and then time out: that killed a --calibrate run before
+    it reached a single image. Sixty-day chunks come back in seconds, and a
+    failed chunk is retried rather than losing the whole year."""
+    ts, vs = [], []
+    cur = start
+    while cur < end:
+        nxt = min(cur + dt.timedelta(days=chunk_days), end)
+        for i in range(attempts):
+            try:
+                t, v = rws_series(location, cur, nxt, proces)
+                break
+            except (requests.RequestException, RuntimeError):
+                if i == attempts - 1:
+                    raise
+                log.info("RWS request %s-%s failed, retrying", cur.date(), nxt.date())
+        ts.append(t)
+        vs.append(v)
+        cur = nxt
+    t, v = np.concatenate(ts), np.concatenate(vs)
+    if not len(t):
+        return t, v
+    t, idx = np.unique(t, return_index=True)    # chunk edges can repeat a sample
+    return t, v[idx]
 
 
 class WaterLevel:

@@ -12,7 +12,8 @@ from dataclasses import dataclass
 import numpy as np
 from pyproj import Transformer
 from rasterio.features import rasterize
-from rasterio.transform import from_bounds
+from rasterio.transform import Affine, from_bounds
+from scipy import ndimage
 
 from zandmotor.config import CFG, HERE
 
@@ -42,9 +43,70 @@ def make_grid(bbox, res_m) -> Grid:
                 [[lat0, lon0], [lat1, lon1]], res_m ** 2)
 
 
+def crop_grid(grid, mask, pad_px):
+    """A sub-grid around `mask`, padded by pad_px cells, aligned cell for cell
+    with `grid`, plus the (row, col) slices that cut it out of full-grid arrays.
+
+    The calibration only needs the lagoon, a few percent of the map, so its
+    satellite requests ask for this window instead of the whole bbox: the same
+    pixels for a fraction of the processing units and download time. Because
+    the window is on the full grid's own cell lattice, results paste straight
+    back into full-size arrays."""
+    rows, cols = np.nonzero(mask)
+    r0, r1 = max(int(rows.min()) - pad_px, 0), min(int(rows.max()) + pad_px + 1, grid.height)
+    c0, c1 = max(int(cols.min()) - pad_px, 0), min(int(cols.max()) + pad_px + 1, grid.width)
+    tr = grid.transform * Affine.translation(c0, r0)
+    w, h = c1 - c0, r1 - r0
+    x0, y1 = tr.c, tr.f                       # top-left corner
+    x1, y0 = x0 + w * tr.a, y1 + h * tr.e     # tr.e is negative
+    to_wgs = Transformer.from_crs(3857, 4326, always_xy=True)
+    lon0, lat0 = to_wgs.transform(x0, y0)
+    lon1, lat1 = to_wgs.transform(x1, y1)
+    sub = Grid(tr, w, h, (x0, y0, x1, y1), [[lat0, lon0], [lat1, lon1]], grid.cell_area_m2)
+    return sub, (slice(r0, r1), slice(c0, c1))
+
+
 def load_lagoon_polygon():
     """Returns (ring, properties) from lagoon.geojson, or (None, None)."""
-    f = HERE / CFG["lagoon_geojson_file"]
+    return _load_ring(HERE / CFG["lagoon_geojson_file"])
+
+
+def load_basin_polygon():
+    """Returns (ring, properties) from lagoon_basin.geojson, or (None, None)."""
+    return _load_ring(HERE / CFG["lagoon_basin_file"])
+
+
+def basin_mask(grid, lagoon, z_raw):
+    """The lagoon basin: the largest extent the lagoon has been traced at,
+    widened by basin_margin_m for tracing error, with dune (AHN above
+    lagoon_trim_land_m, the same rule as trim_lagoon_to_water) cut off. Always
+    contains the lagoon outline.
+
+    The outline is one trace, and a trace from a quiet day is small (4.5 ha on
+    2026-11-16 against 13.4 ha at the 2026-09-01 fill). The basin keeps the
+    rest, so the probable water edge can show the sea flowing back into it.
+
+    AHN no-data patches that touch the basin are added to it: the laser gets
+    no return off water, so they were lagoon when surveyed. Two strips west
+    and north-east of the 13.4 ha trace (2.3 ha) were left out otherwise, and
+    on 2026-11-12 the water went past the basin without them. Patches joined
+    to the map edge are the sea, not lagoon.
+    Returns (mask, found) - without a basin file it is the outline plus the
+    margin, and found is False."""
+    ring, _ = load_basin_polygon()
+    basin = lagoon.copy() if ring is None else polygon_mask(grid, ring) | lagoon
+    px = int(round(CFG["basin_margin_m"] / CFG["grid_res_m"]))
+    if px > 0:
+        basin = ndimage.binary_dilation(basin, iterations=px)
+    gaps, _ = ndimage.label(~np.isfinite(z_raw))
+    edge = np.unique(np.concatenate([gaps[0], gaps[-1], gaps[:, 0], gaps[:, -1]]))
+    touching = np.setdiff1d(np.unique(gaps[ndimage.binary_dilation(basin)]), edge)
+    basin |= np.isin(gaps, touching[touching > 0])
+    land = np.isfinite(z_raw) & (z_raw > CFG["lagoon_trim_land_m"])
+    return (basin & ~land) | lagoon, ring is not None
+
+
+def _load_ring(f):
     if not f.exists():
         return None, None
     gj = json.loads(f.read_text())

@@ -9,7 +9,7 @@ import requests
 
 from zandmotor.config import CACHE, CFG, UTC, log
 from zandmotor.satellite.client import cdse_token
-from zandmotor.satellite.optical import cdse_image, cdse_scenes
+from zandmotor.satellite.optical import cdse_image, cdse_scenes, clear_mask
 from zandmotor.satellite.sar import cdse_sar_image, cdse_sar_scenes, sar_wet_dry
 from zandmotor.wind import fetch_wind_history, max_gust_window
 
@@ -45,15 +45,17 @@ def flats_dry_override(grid, lagoon, now):
     n_used = 0
     try:
         token = cdse_token()
+        # whole-map use, so the strict tile-level cloud filter still fits here
         scenes = cdse_scenes(token, now, days_back=CFG["flats_dry_days_back"],
-                             max_scenes=CFG["flats_dry_max_scenes"])
+                             max_scenes=CFG["flats_dry_max_scenes"],
+                             max_cloud=CFG["sat_max_cloud_full_scene"])
         for t in scenes:
             try:
                 ndwi, scl, _ = cdse_image(token, grid, t)
             except requests.RequestException as e:
                 log.warning("Skipping optical image %s: %s", t.date(), e)
                 continue
-            clear = np.isin(scl.round(), [4, 5, 6, 7, 11])
+            clear = clear_mask(scl)
             if clear.mean() < 0.8:
                 continue
             dry_count[clear & (ndwi < CFG["ndwi_dry"])] += 1
@@ -66,14 +68,15 @@ def flats_dry_override(grid, lagoon, now):
         if sar_scenes:
             lat_c = (CFG["bbox_wgs84"][1] + CFG["bbox_wgs84"][3]) / 2
             lon_c = (CFG["bbox_wgs84"][0] + CFG["bbox_wgs84"][2]) / 2
-            start = dt.datetime.fromtimestamp(min(t.timestamp() for t in sar_scenes),
+            start = dt.datetime.fromtimestamp(min(s.t.timestamp() for s in sar_scenes),
                                               UTC) - dt.timedelta(hours=6)
             try:
-                wt, _, wg = fetch_wind_history(lat_c, lon_c, start, now)
+                wt, _, wg, _ = fetch_wind_history(lat_c, lon_c, start, now)
                 wind_hist = (wt, wg)
             except requests.RequestException:
                 pass
-        for t in sar_scenes:
+        for sc in sar_scenes:
+            t = sc.t
             if wind_hist is not None:
                 gust = max_gust_window(wind_hist[0], wind_hist[1], t.timestamp(),
                                        CFG["sar_wind_check_h"])

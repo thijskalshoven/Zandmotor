@@ -23,11 +23,11 @@ It is not a safety tool, and nothing in the output should suggest that it is.
 - [zandmotor/cli.py](zandmotor/cli.py): argument parsing and run orchestration. Typed errors are caught here, once.
 - [zandmotor/config.py](zandmotor/config.py): `CFG` holds every tunable, URL and filename. Add new constants here rather than hardcoding them.
 - [zandmotor/errors.py](zandmotor/errors.py): `ZandmotorError` subclasses. Library code raises these and never calls `sys.exit()`.
-- [zandmotor/flood.py](zandmotor/flood.py): `compute_wet_masks` is the single flood-mask pipeline.
-- [zandmotor/lagoon_model/](zandmotor/lagoon_model/): lagoon response model. `types.py` holds the tagged dataclasses `TidalResponse`, `WindResponse` and `LakeResponse`, each with its own `area_at()`.
-- [zandmotor/satellite/](zandmotor/satellite/): CDSE client plus Sentinel-2 (optical) and Sentinel-1 (SAR), with shared request-building.
+- [zandmotor/flood.py](zandmotor/flood.py): `compute_wet_masks` is the single flood-mask pipeline for the drawn, uncounted water (wet beach, sea, ponds). `rideable_at` is the one per-instant verdict.
+- [zandmotor/lagoon_model/](zandmotor/lagoon_model/): lagoon response model. `types.py` holds the tagged dataclasses `TidalResponse`, `WindResponse` and `LakeResponse`, each with its own `area_at()` and the observation record with per-observation context (`obs`). `runtime.LagoonWater` is the only counted water, shared by the hourly frames and the window search; in lake mode it fills on surges and drains back via `flood.FillDrain`, whose drain time, wave weight, flood offset and basin floor `fill_drain_fit.py` refits on every `--calibrate` (both run `flood.fill_drain_series` on `flood.effective_level`, so keep them on those functions). The report's size-over-time chart (`cli._lagoon_trend`) replays the past with the fit's stored curve.
+- [zandmotor/satellite/](zandmotor/satellite/): CDSE client plus Sentinel-2 and Landsat 8-9 (optical) and Sentinel-1 (SAR, now only for the flats dry-override: it can't map the lagoon), with shared request-building.
 - `terrain.py` (AHN), `tides.py` (RWS), `wind.py` (Open-Meteo), `kiting.py`, `windows.py`, `outline.py`, `rendering.py`, `html_report/`.
-- `cache/`, `lagoon.geojson`, `*_check.png` and `zandmotor_lagoon.html` are generated and gitignored.
+- `cache/`, `lagoon.geojson`, `lagoon_basin.geojson`, `*_check.png` and `zandmotor_lagoon.html` are generated and gitignored.
 
 ## Commands
 
@@ -49,6 +49,8 @@ A normal run calls live external APIs (PDOK, Rijkswaterstaat, Open-Meteo and opt
 
 - Keep the existing refactor direction: centralized config, typed exceptions, one shared flood pipeline, tagged dataclasses instead of polymorphic dicts, and no duplicated CDSE request code.
 - Match the surrounding style: `from __future__ import annotations`, docstrings that explain *why*, and comments that record past findings so the same leads aren't chased twice.
-- Only the lagoon plus the intertidal strip counts as rideable. The open sea is never included in area totals.
+- Only the lagoon counts as rideable. The wet intertidal beach and the open sea are drawn but never included in area totals or the verdict.
+- Satellite areas count only pixels the satellite actually saw. A second sensor (Landsat, and radar when it was used) gets its threshold fitted against Sentinel-2 images of the same days, per sensor or track; never one fixed threshold across them.
+- Model terms in the fill-and-drain fit are chosen by leave-one-out error, not in-sample error: the record has ~30 images and 3 fills.
 - Test kite upper limits against the gust, not the mean wind.
 - Commit only when asked.

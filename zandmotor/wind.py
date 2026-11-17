@@ -11,16 +11,19 @@ import requests
 from zandmotor.config import CFG, UTC, log
 
 
-def fetch_wind(lat, lon, forecast_days=7):
-    """Hourly wind plus air temperature, and the daily sunrise/sunset pair, in
-    one request. The week-long horizon is what the "next rideable window"
-    search needs; daylight keeps it from offering sessions at 03:00.
-    Returns (times, speed, gust, direction, air_temp, daylight) where daylight
-    is a list of (sunrise_epoch, sunset_epoch)."""
+def fetch_wind(lat, lon, forecast_days=7, past_days=2):
+    """Hourly wind, air temperature and rain, and the daily sunrise/sunset
+    pair, in one request. The week-long horizon is what the "next rideable
+    window" search needs; daylight keeps it from offering sessions at 03:00.
+    past_days reaches back far enough to total the rain since the newest
+    lagoon image (the "may have filled since" flag).
+    Returns (times, speed, gust, direction, air_temp, daylight, rain_mm) where
+    daylight is a list of (sunrise_epoch, sunset_epoch)."""
     params = {"latitude": lat, "longitude": lon,
-              "hourly": "wind_speed_10m,wind_gusts_10m,wind_direction_10m,temperature_2m",
+              "hourly": "wind_speed_10m,wind_gusts_10m,wind_direction_10m,temperature_2m,"
+                        "precipitation",
               "daily": "sunrise,sunset",
-              "wind_speed_unit": "kn", "timezone": "UTC", "past_days": 2,
+              "wind_speed_unit": "kn", "timezone": "UTC", "past_days": int(past_days),
               "forecast_days": forecast_days}
     try:
         r = requests.get(CFG["open_meteo_forecast_url"], params=params, timeout=30)
@@ -33,9 +36,11 @@ def fetch_wind(lat, lon, forecast_days=7):
         daylight = [(dt.datetime.fromisoformat(a).replace(tzinfo=UTC).timestamp(),
                      dt.datetime.fromisoformat(b).replace(tzinfo=UTC).timestamp())
                     for a, b in zip(day.get("sunrise") or [], day.get("sunset") or [])]
+        rain = np.array([np.nan if v is None else v for v in h.get("precipitation") or
+                         [None] * len(t)], float)
         return (t, np.array(h["wind_speed_10m"], float), np.array(h["wind_gusts_10m"], float),
                 np.array(h["wind_direction_10m"], float),
-                np.array(h["temperature_2m"], float), daylight)
+                np.array(h["temperature_2m"], float), daylight, rain)
     except (requests.RequestException, KeyError, ValueError) as e:
         log.warning("No wind data (%s); the map still works without it.", e)
         return None
@@ -87,6 +92,81 @@ def fetch_sea_temp(lat, lon):
         return None
 
 
+def fetch_waves(lat, lon, start=None, end=None, past_days=None, forecast_days=None):
+    """Hourly waves from the Open-Meteo marine API: a date range (start/end,
+    datetimes) for --calibrate, or past_days/forecast_days for a report. The
+    API picks its nearest sea cell (~7 km offshore here), the same one for
+    history and forecast, so the fitted wave term carries over. Returns
+    (times, height_m, period_s, from_deg) or None - fill-and-drain then runs
+    on still water."""
+    params = {"latitude": lat, "longitude": lon, "timezone": "UTC",
+              "hourly": "wave_height,wave_period,wave_direction"}
+    if start is not None:
+        params.update(start_date=f"{start:%Y-%m-%d}", end_date=f"{end:%Y-%m-%d}")
+    else:
+        params.update(past_days=past_days or 0, forecast_days=forecast_days or 7)
+    try:
+        r = requests.get(CFG["open_meteo_marine_url"], params=params, timeout=60)
+        r.raise_for_status()
+        h = r.json()["hourly"]
+        ok = [i for i, x in enumerate(h["wave_height"]) if x is not None]
+        if not ok:
+            raise ValueError("no wave heights returned")
+
+        def col(name):
+            return np.array([np.nan if h[name][i] is None else h[name][i] for i in ok], float)
+        return (np.array([dt.datetime.fromisoformat(h["time"][i]).replace(tzinfo=UTC).timestamp()
+                          for i in ok]),
+                col("wave_height"), col("wave_period"), col("wave_direction"))
+    except (requests.RequestException, KeyError, ValueError) as e:
+        log.warning("No wave heights (%s); the lagoon's surge fill uses still water only.", e)
+        return None
+
+
+def waves_at(waves, t_epoch):
+    """Wave height (m) at t, or 0.0 without data (still water)."""
+    if waves is None:
+        return 0.0 if np.isscalar(t_epoch) else np.zeros(len(t_epoch))
+    return np.interp(t_epoch, waves[0], waves[1])
+
+
+def wave_forcing(waves, t_epoch, form):
+    """The wave term of the flood level (flood.effective_level) at t, in one
+    of four forms the --calibrate fit chooses between:
+      height      significant wave height (m)
+      height_dir  height x the onshore share of the wave direction
+      runup       sqrt(height x deep-water wavelength) - the scaling of beach
+                  run-up (Stockdon et al. 2006): long-period swell runs much
+                  further up than a short chop of the same height
+      runup_dir   runup x the onshore share
+    The onshore share is cos(direction - shore_normal_deg), 0 for waves
+    running along or off the coast. 0 without data (still water)."""
+    if waves is None:
+        return 0.0 if np.isscalar(t_epoch) else np.zeros(len(t_epoch))
+    t, hs, tp, wd = waves
+    h = np.interp(t_epoch, t, np.nan_to_num(hs))
+    if form in ("runup", "runup_dir"):
+        wavelength = 9.81 * np.interp(t_epoch, t, np.nan_to_num(tp)) ** 2 / (2 * np.pi)
+        h = np.sqrt(h * wavelength)
+    if form.endswith("_dir"):
+        # interpolate the direction as a vector, so 350 and 10 degrees average to 0
+        rad = np.radians(np.nan_to_num(wd))
+        ang = np.arctan2(np.interp(t_epoch, t, np.sin(rad)), np.interp(t_epoch, t, np.cos(rad)))
+        h = h * np.clip(np.cos(ang - np.radians(CFG["shore_normal_deg"])), 0.0, None)
+    return h
+
+
+def rain_sum(rain, t_epoch, hours):
+    """Rain (mm) in the `hours` before each t, from an hourly (times, mm)
+    series; 0 without data."""
+    if rain is None:
+        return 0.0 if np.isscalar(t_epoch) else np.zeros(len(t_epoch))
+    t, mm = rain
+    csum = np.concatenate([[0.0], np.cumsum(np.nan_to_num(mm))])
+    return (csum[np.searchsorted(t, t_epoch, side="right")]
+            - csum[np.searchsorted(t, np.asarray(t_epoch) - hours * 3600, side="right")])
+
+
 def sea_temp_at(sea_temp, t_epoch):
     if sea_temp is None:
         return None
@@ -128,24 +208,36 @@ def shore_class(deg):
 
 
 def fetch_wind_history(lat, lon, start, end):
-    """Hourly wind speed/gust archive (not forecast) for fitting against past
-    satellite observations."""
+    """Hourly wind speed/gust and rain archive (not forecast), for gating SAR
+    scenes and for storing the weather context of each satellite observation.
+    The archive lags a few days behind real time; recent hours come back NaN.
+    Returns (times, speed, gust, rain_mm)."""
     r = requests.get(CFG["open_meteo_archive_url"], params={
         "latitude": lat, "longitude": lon,
         "start_date": start.date().isoformat(), "end_date": end.date().isoformat(),
-        "hourly": "wind_speed_10m,wind_gusts_10m", "wind_speed_unit": "kn",
+        "hourly": "wind_speed_10m,wind_gusts_10m,precipitation", "wind_speed_unit": "kn",
         "timezone": "UTC"}, timeout=60)
     r.raise_for_status()
     h = r.json()["hourly"]
     t = np.array([dt.datetime.fromisoformat(s).replace(tzinfo=UTC).timestamp() for s in h["time"]])
-    return t, np.array(h["wind_speed_10m"], float), np.array(h["wind_gusts_10m"], float)
+
+    def arr(name):
+        return np.array([np.nan if v is None else v for v in h[name]], float)
+    return t, arr("wind_speed_10m"), arr("wind_gusts_10m"), arr("precipitation")
 
 
 def max_gust_window(t_arr, gst_arr, te, hours):
-    """Peak gust in the `hours` before te. Used as the wind feature: a year
-    of Zandmotor images showed this correlates with lagoon area (probably
-    intermittent wave overtopping across the low sand berm) much better than
-    sea level does - and better than any onshore/offshore direction split,
-    so direction is deliberately not part of this."""
-    mask = (t_arr >= te - hours * 3600) & (t_arr <= te)
+    """Peak gust in the `hours` before te, NaN without data. Used to gate SAR
+    scenes (rough water reads as land) and as the candidate feature of the
+    wind test in --calibrate. That test does NOT currently hold: it looked
+    strong at n=20 (r=0.60) and collapsed at n=64 (r=0.11) - see the module
+    docstring of zandmotor_lagoon.py. Direction is left out because the
+    onshore component correlated worse than plain magnitude."""
+    mask = (t_arr >= te - hours * 3600) & (t_arr <= te) & np.isfinite(gst_arr)
     return float(gst_arr[mask].max()) if mask.any() else np.nan
+
+
+def sum_window(t_arr, v_arr, t0, t1):
+    """Sum of v over t0 < t <= t1, ignoring NaN; NaN if nothing is covered."""
+    mask = (t_arr > t0) & (t_arr <= t1) & np.isfinite(v_arr)
+    return float(v_arr[mask].sum()) if mask.any() else np.nan

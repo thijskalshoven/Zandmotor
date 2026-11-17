@@ -6,7 +6,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
-:root{--ink:#10293a;--muted:#5b7182;--line:#d5dee4;--paper:#fbfcfd;--go:#1f8a5b;--maybe:#d98b1c;--no:#b8423a;--buoy:#f07f1e}
+:root{--ink:#10293a;--muted:#5b7182;--line:#d5dee4;--paper:#fbfcfd;--go:#1f8a5b;--maybe:#d98b1c;--no:#b8423a;--buoy:#f07f1e;--edge:#1d4f8c}
 *{box-sizing:border-box}html,body{margin:0;height:100%;font-family:Barlow,system-ui,sans-serif;color:var(--ink);background:var(--paper)}
 .app{display:grid;grid-template-columns:minmax(300px,380px) 1fr;height:100%}
 #map{height:100%}
@@ -33,6 +33,15 @@ svg.chart{width:100%;height:120px;display:block;margin-top:6px}
 .obs-plot svg.chart{margin-top:0}
 .obs-x{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:2px}
 .obs-x .obs-xtitle{font-size:11px}
+.obs-legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11px;color:var(--muted);margin-top:4px}
+.obs-legend span{display:inline-flex;align-items:center;gap:4px}
+.obs-legend i{display:inline-block;width:8px;height:8px;border-radius:50%}
+.obs-legend i.hollow{background:none!important;border:1.5px solid #2f7fb8;width:7px;height:7px}
+.obs-legend i.line{width:14px;height:0;border-radius:0;border-top:2px solid #2f7fb8}
+.obs-legend i.thin{border-top:1.5px solid #9fb6c4}
+.obs-legend i.dash{border-top:2px dashed #2f7fb8}
+.trend-x{position:relative;height:14px;font-size:10px;color:var(--muted);margin-top:2px}
+.trend-x span{position:absolute;white-space:nowrap}
 .windrose{background:rgba(255,255,255,.92);border-radius:10px;padding:6px 6px 4px;box-shadow:0 1px 4px rgba(0,0,0,.25);text-align:center;font-family:"Barlow Semi Condensed",Barlow,sans-serif;color:var(--ink)}
 .windrose svg{display:block}
 .windrose .wr-txt{font-size:13px;font-weight:700;line-height:1.1;margin-top:2px}
@@ -83,21 +92,41 @@ table.tides td.kind{color:var(--muted);width:42%}
   <div class="verdict" id="verdict"></div><div class="notes" id="notes"></div>
   <div class="windows" id="windows"></div>
   <dl>
-    <dt>Sea level</dt><dd id="sea"></dd>
     <dt>Lagoon water</dt><dd id="lag"></dd>
-    <dt>Beach shallows</dt><dd id="shal"></dd>
-    <dt>Rideable water</dt><dd id="ride"></dd>
     <dt>Biggest patch</dt><dd id="patch"></dd>
+    <dt>With the tide</dt><dd id="probable"></dd>
+    <dt>Sea level</dt><dd id="sea"></dd>
     <dt>Wind</dt><dd id="wind"></dd>
     <dt>Water temp</dt><dd id="wtemp"></dd>
     <dt>Wetsuit</dt><dd id="suit"></dd>
   </dl>
   <div class="notes" id="suitnote"></div>
-  <div class="sub" style="margin:0">Sea level (tide)</div>
-  <svg class="chart" id="tidechart" viewBox="0 0 300 60" preserveAspectRatio="none"></svg>
-  <table class="tides" id="tides"></table>
-  <div class="sub" style="margin:8px 0 0">Rideable water: lagoon + intertidal beach (bars)</div>
-  <svg class="chart" id="chart" viewBox="0 0 300 120" preserveAspectRatio="none"></svg>
+  <div id="lagwrap" style="display:none">
+    <div class="sub" style="margin:8px 0 0">Lagoon water per hour (bars), dashed line = enough to ride</div>
+    <svg class="chart" id="chart" viewBox="0 0 300 120" preserveAspectRatio="none"></svg>
+  </div>
+  <div id="trendblock">
+    <div class="sub" style="margin:8px 0 0">Lagoon size over time: satellite images, and the
+    fill-and-drain estimate between them and ahead. Where a thin line ends beside the next dot
+    is how far the model was off.</div>
+    <div class="obs">
+      <div class="obs-ytitle">Lagoon water (ha)</div>
+      <div class="obs-yticks" id="trendYticks"></div>
+      <div class="obs-plot">
+        <svg class="chart" id="trendchart" viewBox="0 0 300 120" preserveAspectRatio="none"></svg>
+        <div class="trend-x" id="trendX"></div>
+      </div>
+    </div>
+    <div class="obs-legend">
+      <span><i style="background:#2f7fb8"></i>satellite image</span>
+      <span><i class="hollow"></i>partly clouded: at least this</span>
+      <span><i class="line thin"></i>replay between images</span>
+      <span><i class="line"></i>estimate</span>
+      <span><i class="line dash"></i>forecast</span>
+      <span><i style="background:rgba(47,127,184,.25);border-radius:2px;width:12px"></i>likely range</span>
+      <span style="color:#1d4f8c">&#9660; surge reaches the basin</span>
+    </div>
+  </div>
   <div class="sub" id="lagoonObsLabel" style="margin:8px 0 0"></div>
   <div class="obs" id="obswrap">
     <div class="obs-ytitle">Lagoon water (ha)</div>
@@ -107,6 +136,10 @@ table.tides td.kind{color:var(--muted);width:42%}
       <div class="obs-x"><span id="obsX0"></span><span class="obs-xtitle">Satellite image date</span><span id="obsX1"></span></div>
     </div>
   </div>
+  <div class="obs-legend" id="obsLegend"></div>
+  <div class="sub" style="margin:14px 0 0">Sea level (tide) &mdash; context only, it is not counted</div>
+  <svg class="chart" id="tidechart" viewBox="0 0 300 60" preserveAspectRatio="none"></svg>
+  <table class="tides" id="tides"></table>
   <div class="quiver">
     <h2>My kite quiver</h2>
     <div id="quiverList"></div>
@@ -120,7 +153,7 @@ table.tides td.kind{color:var(--muted);width:42%}
     <div id="sources"></div>
   </div>
   <p class="fine">Water level source per hour: <span id="src"></span>. Terrain: __TERRAIN__.
-  Areas cover the lagoon and the intertidal beach only &mdash; the open sea is drawn but never counted.
+  Only the lagoon is counted &mdash; the wet beach and the open sea are drawn but never counted.
   Model estimate, not a safety tool. Check conditions and local kite zones on the spot.</p>
 </aside>
 <div id="map"></div>
@@ -128,7 +161,7 @@ table.tides td.kind{color:var(--muted);width:42%}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 const D = __DATA__;
-let overlay = null;
+let overlay = null, edge = null;
 try {
   const map = L.map('map', {zoomControl:false});
   const aerial = L.tileLayer('https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_orthoHR/EPSG:3857/{z}/{x}/{y}.jpeg',
@@ -169,14 +202,18 @@ try {
   const Legend = L.Control.extend({options:{position:'bottomright'}, onAdd(){
     const d = L.DomUtil.create('div','legend');
     L.DomEvent.disableClickPropagation(d);
-    d.innerHTML = `<div><span class="sw" style="background:rgb(56,126,168)"></span>Rideable water: lagoon + intertidal beach</div>
+    d.innerHTML = `<div><span class="sw" style="background:rgb(56,126,168)"></span>Lagoon water — the only water counted</div>
+      <div><span class="sw" style="background:rgba(124,181,160,.6)"></span>Wet beach at this tide — drawn, not counted</div>
       <div><span class="sw" style="background:rgba(56,126,168,.28)"></span>Open sea and isolated dune ponds — drawn, not counted</div>
-      <div><span class="sw" style="background:none;border:2px dashed var(--buoy)"></span>Lagoon outline used for the numbers</div>`;
+      <div><span class="sw" style="background:none;border:2px dashed var(--buoy)"></span>Lagoon outline used for the numbers</div>
+      <div><span class="sw" style="background:none;border:2px dashed var(--edge)"></span>Probable water edge at this tide — drawn, not counted</div>`;
     return d; }});
   new Legend().addTo(map);
 
   overlay = L.imageOverlay(D.frames[0].png, D.bounds, {opacity:0.85}).addTo(map);
   L.polygon(D.lagoon, {color:'#f07f1e', weight:2, dashArray:'6 5', fill:false}).addTo(map);
+  // the lagoon plus the tide-driven water joined to it; moves with the slider
+  edge = L.polygon([], {color:'#1d4f8c', weight:2.5, dashArray:'2 5', fill:false}).addTo(map);
 } catch (e) {
   document.getElementById('map').innerHTML = '<p style="padding:20px">The map could not load (no internet?). The numbers on the left still work.</p>';
 }
@@ -203,7 +240,7 @@ function drawQuiver(f){
     $('q-range-'+i).textContent = k.range[0]+'–'+k.range[1];
     const flag = $('q-flag-'+i); flag.innerHTML = '';
     if (k.estimated) flag.innerHTML += '<span class="q-est" title="No manufacturer chart found; range estimated from the size formula">e</span>';
-    if (k.exempt) flag.innerHTML += `<span class="q-est" title="Storm kite: allowed past your ${D.rider.skill_ceiling_kn} kn ceiling">storm</span>`;
+    if (k.exempt) flag.innerHTML += `<span class="q-est" title="Storm kite: ${k.floor != null ? `only used above ${k.floor} kn mean wind, ` : ''}allowed past your ${D.rider.skill_ceiling_kn} kn ceiling">storm</span>`;
     if (k.capped) flag.innerHTML += `<span class="q-est" title="Top of the range capped at your ${D.rider.skill_ceiling_kn} kn ceiling">cap</span>`;
   });
   $('quiverConclusion').textContent = f.quiver.conclusion;
@@ -252,15 +289,22 @@ function draw(i){
   const f = D.frames[i];
   drawRose(f);
   if (overlay) overlay.setUrl(f.png);
+  if (edge) edge.setLatLngs(f.probable || []);
   $('time').textContent = f.time; $('day').textContent = f.day + (f.dark ? ' · dark' : '');
   $('sea').textContent = f.sea.toFixed(2)+' m NAP';
-  // lake mode reports one measured value with its spread for the whole run;
-  // the tidal/wind modes vary per hour, so fall back to this frame's value
-  $('lag').textContent = D.lagoon_label || (f.lagoon_ha.toFixed(1)+' ha');
-  $('shal').textContent = f.shallows_ha.toFixed(1)+' ha';
-  $('ride').textContent = f.rideable_ha.toFixed(1)+' ha';
-  // the largest connected patch is what the verdict actually tests against
+  // lake mode reports the newest satellite image for the whole run (where it
+  // came from is part of the number); the tidal/wind modes vary per hour, so
+  // fall back to this frame's value
+  // a surge since the newest image overrides it with an estimate for this frame
+  // the likely range: how far off the fit was on images it didn't see; the
+  // verdict tests the low end
+  $('lag').textContent = (f.lagoon_label || D.lagoon_label || (f.lagoon_ha.toFixed(1)+' ha')) +
+    (f.lagoon_range ? ` · likely ${f.lagoon_range[0].toFixed(1)}–${f.lagoon_range[1].toFixed(1)} ha` : '');
+  // the largest connected patch of lagoon water is what the verdict tests
   $('patch').textContent = f.usable_ha.toFixed(1)+' ha';
+  // drawn only: the verdict never uses it
+  $('probable').textContent = f.probable ? 'probably up to '+f.probable_ha.toFixed(1)+' ha (not counted)'
+                                         : 'no extra water';
   $('wind').textContent = f.wind;
   $('wtemp').textContent = f.water_c == null ? '—' : f.water_c.toFixed(1)+' °C';
   $('suit').textContent = f.wetsuit || '—';
@@ -270,7 +314,8 @@ function draw(i){
   $('src').textContent = f.src;
   drawQuiver(f);
   tidechart(i);
-  chart(i);
+  trendchart(i);
+  if (D.lagoon_varies) chart(i);
 }
 function tidechart(sel){
   const n = D.frames.length, W=300, H=60, pad=6;
@@ -287,7 +332,7 @@ function tidechart(sel){
 }
 function chart(sel){
   const n = D.frames.length, W=300, H=120, pad=6;
-  const rd = D.frames.map(f=>f.rideable_ha), rmax = Math.max(1,...rd);
+  const rd = D.frames.map(f=>f.lagoon_ha), rmax = Math.max(1, D.min_rideable_ha*1.2, ...rd);
   const x = i => pad + i*(W-2*pad)/Math.max(1,n-1);
   const bw = Math.max(2,(W-2*pad)/n*0.6);
   let s = '';
@@ -301,21 +346,89 @@ function chart(sel){
   if (D.min_rideable_ha < rmax) s += `<line x1="${pad}" y1="${ty}" x2="${W-pad}" y2="${ty}" stroke="#b8423a" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>`;
   $('chart').innerHTML = s;
 }
-// The lagoon's area is a MEASUREMENT, not a forecast: in lake mode nothing in
-// the record predicts it, so this plots the satellite observations it is drawn
-// from plus their spread, rather than a flat line pretending to be a forecast.
+// The lagoon's area is a MEASUREMENT, not a forecast: nothing in the record
+// predicts it hour by hour, so this plots every satellite observation, coloured
+// by sensor and radar track - the two radar tracks once read ~2 ha apart, and a
+// disagreement like that should be visible, not averaged away. The ringed point
+// is the one the sidebar shows; the dashed line is "enough to ride".
+const OBS_COLORS = ['#2f7fb8', '#d98b1c', '#7a5bb5', '#1f8a5b', '#b8423a'];
+// one colour per sensor group, the same in both lagoon charts: photos first,
+// then radar tracks in order, so a group keeps its colour
+const OBS_GROUPS = D.lagoon_obs ? [...new Set(D.lagoon_obs.groups)].sort((a, b) =>
+  (b === 'satellite photo') - (a === 'satellite photo') || a.localeCompare(b)) : [];
+const obsColor = g => OBS_COLORS[Math.max(0, OBS_GROUPS.indexOf(g)) % OBS_COLORS.length];
+// Lagoon size over time. Between images the size is an estimate (fill-and-
+// drain): the thin line from each image is the replay the fit was scored on,
+// so where it ends beside the next dot is the model's miss there. The thick
+// line is the estimate the map shows, from the newest image on, dashed once
+// it becomes a forecast. The orange line follows the slider.
+function trendchart(sel){
+  const T = D.lagoon_trend;
+  if (!T){ $('trendblock').style.display = 'none'; return; }
+  const W=300, H=120, pad=8;
+  const vals = T.segments.flatMap(g => g.pts.map(p => p[1])).concat(T.images.map(m => m.ha),
+    (T.band || []).map(b => b[2]));
+  const amax = Math.max(...vals, D.min_rideable_ha)*1.12;
+  const x = t => pad + (Math.min(Math.max(t, T.t0), T.t1)-T.t0)*(W-2*pad)/(T.t1-T.t0);
+  const y = a => H-pad-(H-2*pad)*a/amax;
+  const ln = 'vector-effect="non-scaling-stroke"';
+  const poly = (pts, attrs) => pts.length > 1 ?
+    `<polyline points="${pts.map(p => `${x(p[0])},${y(p[1])}`).join(' ')}" fill="none" ${attrs} ${ln}/>` : '';
+  const step = amax > 10 ? 4 : amax > 5 ? 2 : 1;
+  let s = '', ticks = '';
+  for (let a = 0; a <= amax; a += step){
+    s += `<line x1="${pad}" y1="${y(a)}" x2="${W-pad}" y2="${y(a)}" stroke="#d5dee4" stroke-width="1" ${ln}/>`;
+    ticks += `<span style="top:${y(a)/H*100}%">${a}</span>`;
+  }
+  $('trendYticks').innerHTML = ticks;
+  // faint line at every local midnight, so the hours can be read off
+  for (let d = new Date(T.t0*1000); d.getTime()/1000 <= T.t1; d.setDate(d.getDate()+1)){
+    d.setHours(0, 0, 0, 0);
+    const t = d.getTime()/1000;
+    if (t > T.t0) s += `<line x1="${x(t)}" y1="${pad}" x2="${x(t)}" y2="${H-pad}" stroke="#eef2f5" stroke-width="1" ${ln}/>`;
+  }
+  s += `<line x1="${pad}" y1="${y(D.min_rideable_ha)}" x2="${W-pad}" y2="${y(D.min_rideable_ha)}" stroke="#b8423a" stroke-width="1" stroke-dasharray="4 3" ${ln}><title>Enough water to ride (${D.min_rideable_ha} ha)</title></line>`;
+  s += `<line x1="${x(T.now)}" y1="${pad}" x2="${x(T.now)}" y2="${H-pad}" stroke="#5b7182" stroke-width="1" ${ln}/>`;
+  if (T.band && T.band.length > 1){
+    const up = T.band.map(b => `${x(b[0])},${y(b[2])}`), down = T.band.slice().reverse().map(b => `${x(b[0])},${y(b[1])}`);
+    s += `<polygon points="${up.concat(down).join(' ')}" fill="#2f7fb8" opacity="0.13"><title>Likely range: how far off the fit was on images it wasn't fitted on</title></polygon>`;
+  }
+  T.segments.forEach(g => {
+    if (g.kind === 'replay'){ s += poly(g.pts, 'stroke="#9fb6c4" stroke-width="1.5"'); return; }
+    s += poly(g.pts.filter(p => p[0] <= T.now + 1800), 'stroke="#2f7fb8" stroke-width="2.2"');
+    s += poly(g.pts.filter(p => p[0] >= T.now - 1800), 'stroke="#2f7fb8" stroke-width="2.2" stroke-dasharray="4 3"');
+  });
+  T.surges.forEach(u => {
+    s += `<path d="M${x(u.t)-3.5},${pad-6} h7 l-3.5,6 z" fill="#1d4f8c"><title>${u.text}</title></path>`;
+  });
+  const day = t => new Date(t*1000).toLocaleDateString('en-GB', {day:'numeric', month:'short'});
+  T.images.forEach(m => {
+    const c = obsColor(m.group);
+    s += `<circle cx="${x(m.t)}" cy="${y(m.ha)}" r="3" fill="${m.partial ? '#fff' : c}" stroke="${m.partial ? c : '#fff'}" stroke-width="${m.partial ? 1.5 : 0.8}">` +
+         `<title>${day(m.t)}: ${m.ha.toFixed(1)} ha, ${m.group}${m.partial ? ' (clouds hid part of the basin: at least this)' : ''}</title></circle>`;
+  });
+  const f = D.frames[sel];
+  s += `<line x1="${x(f.te)}" y1="${pad}" x2="${x(f.te)}" y2="${H-pad}" stroke="#f07f1e" stroke-width="1.5" ${ln}/>`;
+  s += `<circle cx="${x(f.te)}" cy="${y(f.lagoon_ha)}" r="4" fill="#f07f1e" stroke="#fff" stroke-width="1.5"><title>${f.day} ${f.time}: ${f.lagoon_ha.toFixed(1)} ha</title></circle>`;
+  $('trendchart').innerHTML = s;
+  const pct = t => (x(t)/W*100).toFixed(1)+'%';
+  $('trendX').innerHTML = `<span style="left:0">${day(T.t0)}</span>` +
+    `<span style="left:${pct(T.now)};transform:translateX(-50%)">now</span>` +
+    `<span style="right:0">${day(T.t1)}</span>`;
+}
 function obschart(){
   const o = D.lagoon_obs;
   if (!o || !o.times.length){ $('obswrap').style.display = 'none'; $('lagoonObsLabel').textContent=''; return; }
   $('lagoonObsLabel').textContent = o.label;
+  const groups = OBS_GROUPS, color = obsColor;
   const W=300, H=90, pad=8;
   const t0 = Math.min(...o.times), t1 = Math.max(...o.times);
-  const amax = Math.max(...o.areas, o.hi)*1.1;
+  const amax = Math.max(...o.areas, D.min_rideable_ha)*1.1;
   const x = t => pad + (t-t0)*(W-2*pad)/Math.max(1,t1-t0);
   const y = a => H-pad-(H-2*pad)*a/amax;
-  // y gridlines every 1 or 2 ha, labelled in HTML beside the plot: text
-  // inside this stretched (preserveAspectRatio=none) SVG would be distorted
-  const step = amax > 5 ? 2 : 1;
+  // y gridlines, labelled in HTML beside the plot: text inside this stretched
+  // (preserveAspectRatio=none) SVG would be distorted
+  const step = amax > 10 ? 4 : amax > 5 ? 2 : 1;
   let s = '', ticks = '';
   for (let a = 0; a <= amax; a += step){
     s += `<line x1="${pad}" y1="${y(a)}" x2="${W-pad}" y2="${y(a)}" stroke="#d5dee4" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
@@ -324,14 +437,17 @@ function obschart(){
   $('obsYticks').innerHTML = ticks;
   const fmt = t => new Date(t*1000).toLocaleDateString('en-GB', {month:'short', year:'numeric'});
   $('obsX0').textContent = fmt(t0); $('obsX1').textContent = fmt(t1);
-  s += `<rect x="${pad}" y="${y(o.hi)}" width="${W-2*pad}" height="${Math.max(1,y(o.lo)-y(o.hi))}" fill="#b9d8e4" opacity="0.5"/>`;
-  s += `<line x1="${pad}" y1="${y(o.median)}" x2="${W-pad}" y2="${y(o.median)}" stroke="#10293a" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`;
+  s += `<line x1="${pad}" y1="${y(D.min_rideable_ha)}" x2="${W-pad}" y2="${y(D.min_rideable_ha)}" stroke="#b8423a" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>`;
   o.times.forEach((t,i)=>{
-    const used = o.used[i];
-    s += `<circle cx="${x(t)}" cy="${y(o.areas[i])}" r="${used?2.6:2}" fill="${used?'#2f7fb8':'none'}" stroke="${used?'#fff':'#9db3c0'}" stroke-width="1"/>`;
+    s += `<circle cx="${x(t)}" cy="${y(o.areas[i])}" r="2.4" fill="${color(o.groups[i])}" stroke="#fff" stroke-width="0.8"/>`;
   });
+  if (o.latest >= 0){
+    s += `<circle cx="${x(o.times[o.latest])}" cy="${y(o.areas[o.latest])}" r="5" fill="none" stroke="#10293a" stroke-width="1.5"/>`;
+  }
   $('obschart').innerHTML = s;
+  $('obsLegend').innerHTML = groups.map(g=>`<span><i style="background:${color(g)}"></i>${g}</span>`).join('');
 }
+if (D.lagoon_varies) $('lagwrap').style.display = '';
 $('slider').addEventListener('input', e => draw(+e.target.value));
 $('t0').textContent = D.frames[0].time; $('t1').textContent = D.frames[D.frames.length-1].time;
 initQuiver();

@@ -15,9 +15,10 @@ def kite_advice(w, usable_ha, quiver):
     """Verdict for one hour: is there water, does a kite you own fit, and is
     anything about the wind unpleasant.
 
-    usable_ha is the largest CONNECTED wet patch (see largest_patch_ha), not a
-    total - the total is what let ~620 ha of North Sea, and later 250 ha of
-    scattered beach, stand in for a rideable surface.
+    usable_ha is the largest CONNECTED patch of LAGOON water (see
+    LagoonWater), not a total and not the beach - totals let ~620 ha of North
+    Sea, then 250 ha of scattered beach, and then a tide-driven 0-21 ha of
+    intertidal strip stand in for a rideable surface.
 
     The kite question is answered by the quiver (see quiver_advice), not by an
     abstract wind table. There used to be both, and they contradicted each
@@ -27,7 +28,7 @@ def kite_advice(w, usable_ha, quiver):
     notes = []
     water_ok = usable_ha >= CFG["min_rideable_ha"]
     if not water_ok:
-        notes.append(f"largest patch of water only {usable_ha:.1f} ha "
+        notes.append(f"largest patch of lagoon water only {usable_ha:.1f} ha "
                      f"(want {CFG['min_rideable_ha']:.0f})")
     if w is None:
         return "No wind data", "no", notes + ["no wind forecast"]
@@ -97,6 +98,11 @@ def kite_wind_range(kite, rider):
     hold and what you want to be out in are different numbers - unless the
     kite is marked exempt_from_ceiling (a storm kite that only makes sense
     above it).
+
+    A kite with min_wind_kn starts there instead: a floor the rider sets for
+    themselves, so the weight shift doesn't push it up (the storm kite's
+    28 kn chart bottom became 33.9 kn at 88 kg, leaving it unused between
+    the 28 kn ceiling of the time and 33.9 kn).
     Returns (lo, hi, estimated, capped)."""
     if kite["wind_range_75kg"] is not None:
         lo75, hi75 = kite["wind_range_75kg"]
@@ -109,6 +115,8 @@ def kite_wind_range(kite, rider):
     half = (hi75 - lo75) / 2
     centre = (lo75 + hi75) / 2 * rider["weight_kg"] / 75.0
     lo, hi = max(centre - half, 0.0), centre + half
+    if kite.get("min_wind_kn") is not None:
+        lo = float(kite["min_wind_kn"])
     ceiling = rider.get("skill_ceiling_kn")
     capped = ceiling is not None and hi > ceiling and not kite.get("exempt_from_ceiling")
     if capped:
@@ -129,19 +137,24 @@ def quiver_advice(w, rider):
     further kite_marginal_frac buffer, else "off". The buffer never extends
     past the skill ceiling - that bound is meant to be hard - except for a
     kite marked exempt_from_ceiling. Gusts past the ceiling only rule the hour
-    out when no exempt kite fits them."""
+    out when no exempt kite fits them.
+
+    A kite's min_wind_kn is a hard floor: at or below it the kite is "off",
+    with no marginal band underneath, because "only above 28 kn" is meant
+    literally - otherwise the buffer would offer the storm kite from 23.8 kn."""
     kites = []
     for k in CFG["quiver"]:
         lo, hi, estimated, capped = kite_wind_range(k, rider)
         kites.append({"name": k["name"], "size_m2": k["size_m2"],
                       "range": (round(lo, 1), round(hi, 1)),
                       "estimated": estimated, "capped": capped,
-                      "exempt": bool(k.get("exempt_from_ceiling"))})
+                      "exempt": bool(k.get("exempt_from_ceiling")),
+                      "floor": k.get("min_wind_kn")})
 
     if w is None:
         for k in kites:
             k["status"] = "off"
-        return {"kites": kites, "best": None, "best_status": None,
+        return {"kites": kites, "best": None, "best_size_m2": None, "best_status": None,
                 "over_ceiling": False, "past_ceiling": False, "conclusion": "No wind data"}
 
     spd, gst = w[0], w[1]
@@ -153,7 +166,9 @@ def quiver_advice(w, rider):
         hi_buf = hi * (1 + m)
         if ceiling is not None and not k["exempt"]:
             hi_buf = min(hi_buf, float(ceiling))
-        if lo <= spd and gst <= hi:
+        if k["floor"] is not None and spd <= k["floor"]:
+            k["status"] = "off"
+        elif lo <= spd and gst <= hi:
             k["status"] = "ideal"
         elif lo * (1 - m) <= spd and gst <= hi_buf:
             k["status"] = "marginal"
@@ -193,7 +208,10 @@ def quiver_advice(w, rider):
             conclusion = (f"Too strong for all {len(kites)} kites right now "
                           f"({spd:.0f} kn gusting {gst:.0f})")
 
+    # the size travels with the name: two kites share the name "Drifter"
+    # (4.5 m and 7 m), so the name alone doesn't say which one was picked
     return {"kites": kites, "best": best["name"] if best else None,
+            "best_size_m2": best["size_m2"] if best else None,
             "best_status": best_status, "over_ceiling": over_ceiling,
             "past_ceiling": past_ceiling,
             "conclusion": conclusion}

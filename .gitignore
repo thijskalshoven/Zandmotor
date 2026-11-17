@@ -5,6 +5,7 @@ __pycache__/
 cache/
 zandmotor_lagoon.html
 lagoon.geojson
+lagoon_basin.geojson
 lagoon_outline_check.png
 demo_outline_check.png
 *.egg-info/

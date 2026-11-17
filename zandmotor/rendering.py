@@ -12,8 +12,9 @@ from pyproj import Transformer
 
 from zandmotor.config import CFG, log
 
-WATER_COLOR = (56, 126, 168, 220)     # rideable: lagoon + intertidal beach
-SEA_COLOR = (56, 126, 168, 70)        # open sea: drawn, but never counted
+WATER_COLOR = (56, 126, 168, 220)     # rideable: the lagoon, the only water counted
+BEACH_COLOR = (124, 181, 160, 150)    # wet intertidal beach: drawn, never counted
+SEA_COLOR = (56, 126, 168, 70)        # open sea and dune ponds: drawn, never counted
 
 
 def terrain_rgb(z):
@@ -80,11 +81,15 @@ def outline_preview(rgb, ring, grid, title, path):
     log.info("Written %s", path.name)
 
 
-def class_png(rideable, sea):
-    """Two-tone water overlay: what counts as rideable in full colour, the
-    open sea in a paler tone. They used to be one mask summed into one
-    number, which let ~620 ha of North Sea stand in for a 2.8 ha lagoon."""
-    rgba = np.zeros(rideable.shape + (4,), "uint8")
-    rgba[sea] = SEA_COLOR
-    rgba[rideable] = WATER_COLOR
+def class_png(lagoon, beach, uncounted):
+    """Three-tone water overlay: the lagoon (the only water counted) in full
+    colour, the wet intertidal beach in a lighter green-blue, and the open sea
+    and dune ponds palest. The beach gets its own tone because it comes and
+    goes with the tide right next to the lagoon, and used to be counted with
+    it; the sea and ponds were once counted too (~620 ha against a 2.8 ha
+    lagoon)."""
+    rgba = np.zeros(lagoon.shape + (4,), "uint8")
+    rgba[uncounted] = SEA_COLOR
+    rgba[beach] = BEACH_COLOR
+    rgba[lagoon] = WATER_COLOR
     return png_uri(rgba)

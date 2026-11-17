@@ -13,7 +13,8 @@ _TEMPLATE_PATH = Path(__file__).resolve().parent / "template.html"
 
 
 def write_html(path, frames, grid, lagoon_ring, location, terrain_note, warnings, terrain_uri,
-               windows, tides, lagoon_obs, lagoon_label, sources):
+               windows, tides, lagoon_obs, lagoon_label, lagoon_varies, sources,
+               lagoon_trend=None):
     template = _TEMPLATE_PATH.read_text(encoding="utf-8")
     lats = [p[1] for p in lagoon_ring]
     lons = [p[0] for p in lagoon_ring]
@@ -28,7 +29,12 @@ def write_html(path, frames, grid, lagoon_ring, location, terrain_note, warnings
             "windows": windows["list"], "windows_none": windows["none"],
             "windows_caveat": windows["caveat"],
             "tides": tides, "lagoon_obs": lagoon_obs, "lagoon_label": lagoon_label,
-            "sources": sources}
+            # per-hour lagoon bars only mean something when the lagoon changes
+            # within the run (tidal/wind modes); in lake mode it is one value
+            "lagoon_varies": bool(lagoon_varies),
+            "sources": sources,
+            # size over time: images, the replay between them, the estimate ahead
+            "lagoon_trend": lagoon_trend}
     warn_html = "".join(f'<div class="warn">{w}</div>' for w in warnings)
     html = (template
             .replace("__DATA__", json.dumps(data))
