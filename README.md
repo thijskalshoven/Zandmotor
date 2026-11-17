@@ -6,6 +6,57 @@ A kitesurfing nowcast for the lagoon on the Zandmotor, the artificial sand penin
 
 > **Not a safety tool.** This is a model estimate. Always check conditions and local kite zones on the spot.
 
+## Install on a Mac (5 minutes)
+
+You don't need to know anything about programming. You need a Mac and an internet connection.
+
+1. Open **Terminal**: press ⌘ and the space bar, type `Terminal`, and press Enter.
+2. Copy this line, paste it into the Terminal window, and press Enter:
+
+   ```
+   curl -LsSf https://raw.githubusercontent.com/thijskalshoven/Zandmotor/main/install.sh | sh
+   ```
+
+   It takes a minute or two. When it says **Done**, a folder called **Zandmotor Kite** opens, and there is a **Zandmotor** icon on your Desktop. You can close Terminal.
+3. Double-click **Zandmotor** on your Desktop.
+4. The first time, it asks a few questions in a Terminal window: your weight, the strongest gusts you want to ride in, and your kites. For each kite, give its size and, if you know it, the wind range from the maker's chart (for example `11-25`). To add a photo, drag the picture into the window and press Enter. Press Enter without typing anything to skip a question or keep the value shown in [brackets].
+5. The report opens in your browser. From then on, double-click **Zandmotor** whenever you want a fresh one.
+
+The first report also downloads the lagoon model (about 10 MB), so it takes a little longer.
+
+### Everyday use
+
+Everything lives in the **Zandmotor Kite** folder in your home folder:
+
+| | |
+|---|---|
+| **Zandmotor** | builds a new report and opens it |
+| **Change settings** | asks the questions again, to change your weight or kites |
+| **Update Zandmotor** | installs the newest version; your settings and photos are kept |
+| `settings.toml` | your settings, which you can also edit in TextEdit (it explains every line, including a storm kite and the wetsuit table) |
+| `Kites` | your kite photos |
+| `zandmotor_lagoon.html` | the latest report |
+
+The lagoon model updates by itself: the maintainer publishes a new one after each calibration, and the next report picks it up.
+
+### If something goes wrong
+
+- **"Zandmotor" can't be opened because it is from an unidentified developer**: right-click the icon, choose **Open**, then **Open** again. macOS remembers this.
+- **No internet**: the report needs the wind and tide forecasts, so it can't be built offline. A report you already have still opens; the map needs internet, the numbers don't.
+- **A message about settings.toml**: double-click **Change settings** to write the file again.
+- **Something else**: the Terminal window shows what went wrong. Copy that text when you ask for help.
+
+### Uninstall
+
+In Terminal:
+
+```
+uv tool uninstall zandmotor
+rm -rf ~/Library/Caches/zandmotor
+```
+
+Then drag the **Zandmotor Kite** folder and the Desktop icon to the Bin.
+
 ## What the report shows
 
 - **A map** of where there is water, hour by hour. Lagoon water, the only water that counts, is drawn in full colour. The wet beach at the current tide is drawn in a lighter tone and the open sea palest; neither is ever counted.
@@ -47,7 +98,9 @@ A dotted **probable water edge** on the map shows where the water probably reach
 
 Each satellite image only counts the pixels it actually saw. Landsat's water threshold is fitted against Sentinel-2 images of the same days. Radar is no longer used for the lagoon: over this flat, wet, sandy basin it can't tell water from sand (the design notes have the numbers). The design notes in [zandmotor_lagoon.py](zandmotor_lagoon.py) record what was tried, including an earlier wind relationship and a rain relationship that turned out to be false positives.
 
-## Install
+## For developers and the maintainer
+
+### Install from a checkout
 
 Requires Python 3.9 or later.
 
@@ -56,10 +109,23 @@ git clone https://github.com/thijskalshoven/Zandmotor.git
 cd Zandmotor
 python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[tide]"        # tide = optional utide fallback for the water level
+pip install -e ".[dev,tide]"     # tide = optional utide fallback for the water level
+zandmotor --setup                # your rider and kites, written to settings.toml
 ```
 
-## Usage
+### Two layouts
+
+Where the files live depends on how the code is installed:
+
+| | Git checkout (the maintainer, CI, the tests) | Installed with `install.sh` |
+|---|---|---|
+| `settings.toml`, `Kites/`, the report | the project root | `~/Zandmotor Kite` |
+| `lagoon.geojson`, `lagoon_basin.geojson`, `cache/` | the project root | `~/Library/Caches/zandmotor` |
+| Lagoon model | your own `--outline` and `--calibrate` | the shared model, downloaded and kept up to date |
+
+A checkout is a folder with both `.git` and `pyproject.toml` next to the package. `ZANDMOTOR_HOME` moves the settings folder in either layout. An installed copy that runs `--calibrate` or `--outline` itself stops following the shared model, until `zandmotor --shared-model`.
+
+### Usage
 
 ```bash
 python zandmotor_lagoon.py                      # now + next 8 hours, opens in the browser
@@ -67,13 +133,14 @@ python zandmotor_lagoon.py --hours 12 --step 30 # 12 hours in 30-minute steps
 python zandmotor_lagoon.py --no-open            # write the page without opening it
 python zandmotor_lagoon.py --outline            # re-trace the lagoon outline
 python zandmotor_lagoon.py --calibrate          # pull recent satellite images of the lagoon
+python zandmotor_lagoon.py --setup              # change your rider and kites
 ```
 
-`python -m zandmotor` and the installed `zandmotor` command work the same way. The output is `zandmotor_lagoon.html`, a single file. The numbers work offline; the map needs an internet connection.
+`python -m zandmotor` and the installed `zandmotor` command work the same way. The output is `zandmotor_lagoon.html`, a single file, in the settings folder. The numbers work offline; the map needs an internet connection.
 
 A normal run needs no account. It uses the cached lagoon model and fetches tide and wind live. The first run also downloads the terrain, which is then cached.
 
-### Satellite data (optional)
+#### Satellite data (optional)
 
 `--calibrate` and `--outline sentinel` need a free [Copernicus Data Space](https://dataspace.copernicus.eu) account. In its dashboard, create an OAuth client (Sentinel Hub) and set:
 
@@ -84,7 +151,7 @@ export CDSE_CLIENT_SECRET=...
 
 Run `--calibrate` every week or two. The report warns when the newest lagoon image is more than 14 days old, and when a stormy or wet spell since that image may have filled the lagoon. A run doesn't always find a newer image, because images that don't show most of the lagoon are skipped.
 
-### Lagoon outline
+#### Lagoon outline
 
 `--outline` writes `lagoon.geojson` and a check image, `lagoon_outline_check.png`. It also merges the new outline into `lagoon_basin.geojson`, the largest extent the lagoon has been traced at. The basin only grows, so a trace from a quiet day can't shrink it. Patches with no elevation data that touch it are added too, since they were water when surveyed. Delete it if the Zandmotor reshapes so much that the old basin is wrong. A changed outline or basin needs a new `--calibrate`.
 
@@ -94,37 +161,67 @@ Run `--calibrate` every week or two. The report warns when the newest lagoon ima
 
 Parts of the traced outline that the elevation data shows are dune (above 3 m NAP) are cut off, and the report says how much. The cut used to sit at 0.5 m NAP, but the lagoon is perched above sea level and that removed real lagoon. If the wrong water body is picked, set `CFG["lagoon_hint"]` to a point inside the lagoon, or draw the outline on [geojson.io](https://geojson.io) and save it as `lagoon.geojson`.
 
-## Configuration
 
-Everything tunable lives in `CFG` in [zandmotor/config.py](zandmotor/config.py). The parts you will most likely change:
+### Publishing the shared lagoon model
 
-- **`rider`**: weight, height, board and `skill_ceiling_kn`, the strongest gust you want to be out in (46 kn).
-- **`quiver`**: your kites. Each has a size, a photo in `Kites/` and, if known, the manufacturer's wind range for a 75 kg rider (`wind_range_75kg`). Ranges are shifted for your weight and capped at your ceiling. A kite without a chart gets an estimated range, marked **e** in the report. Set `exempt_from_ceiling` on a storm kite that only makes sense above your ceiling, and `min_wind_kn` to the mean wind it should start at. The kite is then only considered above that wind, whatever your weight. The 4.5 m Drifter is set to 28 kn.
+Installed copies have no Copernicus account, so they use the maintainer's model. After `--outline` or `--calibrate`, publish it:
+
+```bash
+brew install gh && gh auth login   # once
+scripts/publish-model.sh
+```
+
+This writes a snapshot with `zandmotor --export-model` and uploads it to the `model` pre-release on GitHub. The snapshot holds the outline, the basin, the wetness map, the fitted response and fill-and-drain, the newest flats dry-override, the AHN tile and the coastal DTM. AHN is included even though anyone can download it: the basin is built from its gaps and is part of the wetness map's fingerprint, so a newer AHN would make the shared model unusable. Installed copies look for a new snapshot at most every 6 hours (`model_check_hours`), check every file's checksum, and keep the old model if anything fails. To test a snapshot locally: `zandmotor --shared-model path/to/zandmotor-model.zip`; in a checkout this overwrites your own model files.
+
+Installs come from the `main` branch, so keep `main` working and make bigger changes on a branch.
+
+### Configuration
+
+Your own settings live in `settings.toml` (written by `zandmotor --setup`, and explained line by line inside it):
+
+- **`[rider]`**: weight, `skill_ceiling_kn` (the strongest gust you want to be out in), and optionally height and board.
+- **`[[kite]]`**, one per kite: the size, a photo in `Kites/` and, if known, the manufacturer's wind range for a 75 kg rider (`wind_range_75kg`). Ranges are shifted for your weight and capped at your ceiling. A kite without a chart gets an estimated range, marked **e** in the report. Set `exempt_from_ceiling = true` on a storm kite that only makes sense above your ceiling, and `min_wind_kn` to the mean wind it should start at. The kite is then only considered above that wind, whatever your weight.
 - **`min_rideable_ha`**: the smallest connected patch of lagoon water worth riding (default 3 ha). It is tested against the low end of the lagoon's likely range when the size is an estimate between images.
-- **`local_dem`**: a path to your own elevation GeoTIFF, instead of downloading AHN.
-- **`coastal_dem`**: a newer survey laid over AHN where it has data; by default the Rijkswaterstaat 2026 coastal DTM at `cache/rws_kust_2026_dtm_2m.tif`. That file isn't downloaded by the code, so move it out of `cache/` (and update the path) if you ever clear the cache.
+- **`[[wetsuit]]`** and **`[wetsuit_chill]`**: the wetsuit advice.
 
-## Project layout
+Without a `settings.toml` the report uses an example rider with two example kites, and says so.
+
+Everything else, the site and model constants, lives in `CFG` in [zandmotor/config.py](zandmotor/config.py). For example:
+
+- **`local_dem`**: a path to your own elevation GeoTIFF, instead of downloading AHN.
+- **`coastal_dem`**: a newer survey laid over AHN where it has data; by default the Rijkswaterstaat 2026 coastal DTM at `cache/rws_kust_2026_dtm_2m.tif`. The code doesn't download that file. It travels in the shared model, so `zandmotor --shared-model` brings it back if you clear the cache.
+
+### Project layout
 
 ```
 zandmotor_lagoon.py      entry point, plus the full design notes
 zandmotor/
   cli.py                 argument parsing and run orchestration
-  config.py              CFG: every tunable, URL and filename
+  config.py              CFG: every tunable, URL and filename, and the two layouts
+  settings.py            settings.toml: the user's rider, kites and wetsuit table
+  setup_wizard.py        zandmotor --setup
+  model_bundle.py        the shared lagoon model: export, download, install
+  launchers/             the double-click .command files install.sh sets up
   flood.py               the flood-mask pipeline
   lagoon_model/          lagoon size model (calibration, fill-and-drain fit, runtime)
   satellite/             Copernicus client, Sentinel-2, Landsat 8-9 and Sentinel-1
   terrain.py tides.py wind.py kiting.py windows.py outline.py rendering.py
   html_report/           the HTML template and page assembly
-Kites/                   kite photos shown in the quiver section
+Kites/                   the maintainer's kite photos
+install.sh               the one-line Mac installer
+scripts/publish-model.sh publishes the shared lagoon model
 tests/                   pytest suite (no network needed)
 ```
 
-`cache/`, `lagoon.geojson`, `lagoon_basin.geojson`, the `*_check.png` images and `zandmotor_lagoon.html` are generated and not tracked.
+`settings.toml`, `cache/`, `lagoon.geojson`, `lagoon_basin.geojson`, the `*_check.png` images and `zandmotor_lagoon.html` are personal or generated, and not tracked.
 
-## Tests
+### Tests
 
 ```bash
 pip install -e ".[dev]"
 pytest
 ```
+
+## Data and credits
+
+Terrain: [AHN](https://www.ahn.nl) via PDOK (CC0), and the Rijkswaterstaat 2026 coastal DTM. Water level: Rijkswaterstaat WaterWebservices. Satellite images: Copernicus Sentinel-2 and Sentinel-1 data, and Landsat 8-9 (USGS/NASA), via the [Copernicus Data Space Ecosystem](https://dataspace.copernicus.eu). Weather, waves and sea temperature: [Open-Meteo.com](https://open-meteo.com) (CC BY 4.0). Map: OpenStreetMap contributors and the PDOK aerial photo.

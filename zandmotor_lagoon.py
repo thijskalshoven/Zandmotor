@@ -60,8 +60,11 @@ hit by.
 
 Install
 -------
-    pip install requests numpy rasterio pyproj scikit-image pillow scipy
-    pip install utide            # optional, extra fallback for the tide
+See README.md: a one-line installer for non-technical Mac users (install.sh,
+which sets up uv, the app, double-click launchers and the setup wizard), and
+`pip install -e ".[dev,tide]"` from a checkout. The user's own rider, kites and
+wetsuit table live in settings.toml (zandmotor.settings), not in CFG; installed
+copies download the maintainer's lagoon model (zandmotor.model_bundle).
 
 Run
 ---

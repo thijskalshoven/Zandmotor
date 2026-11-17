@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 
 import numpy as np
 import requests
@@ -33,12 +34,22 @@ def flats_dry_override(grid, lagoon, now):
     (that turned out to never fire on exactly the noisy cells this exists
     to fix). Cells that are wet most of the time (the real lagoon, real
     canals) still won't qualify, since their wet count stays high.
-    Cached per calendar day so a normal run doesn't refetch imagery."""
+    Cached per calendar day so a normal run doesn't refetch imagery.
+
+    The newest mask is also kept as flats_dry_shared_file, which the shared
+    lagoon model carries (model_bundle): a copy without a Copernicus account
+    can't fetch images, and uses that one instead of none."""
     cache_file = CACHE / CFG["flats_dry_cache_pattern"].format(date=now.date())
+    shared_file = CACHE / CFG["flats_dry_shared_file"]
     if cache_file.exists():
         cached = np.load(cache_file)
         if cached.shape == lagoon.shape:
+            if (not shared_file.exists()
+                    or shared_file.stat().st_mtime < cache_file.stat().st_mtime):
+                np.save(shared_file, cached)
             return cached
+    if not (os.environ.get("CDSE_CLIENT_ID") and os.environ.get("CDSE_CLIENT_SECRET")):
+        return _shared_dry(shared_file, lagoon)
 
     dry_count = np.zeros(lagoon.shape, "int32")
     wet_count = np.zeros(lagoon.shape, "int32")
@@ -100,7 +111,7 @@ def flats_dry_override(grid, lagoon, now):
         log.warning("Only %d usable recent image(s) for the flats dry-override (need "
                     "%d independent looks); skipping it this run.",
                     n_used, CFG["flats_dry_min_looks"])
-        return None
+        return _shared_dry(shared_file, lagoon)
 
     # Majority vote, not a zero-tolerance veto: single-scene noise means even a
     # genuinely dry cell will occasionally read "wet" (validated above), so
@@ -109,6 +120,19 @@ def flats_dry_override(grid, lagoon, now):
     # canals) still won't qualify since their wet_count stays high.
     dry = (dry_count >= CFG["flats_dry_min_looks"]) & (dry_count > wet_count) & ~lagoon
     np.save(cache_file, dry)
+    np.save(shared_file, dry)
     log.info("Flats dry-override from %d recent images (optical+SAR): %.2f ha "
             "confirmed dry", n_used, dry.sum() * grid.cell_area_m2 / 1e4)
+    return dry
+
+
+def _shared_dry(shared_file, lagoon):
+    """The mask the shared lagoon model carries, or None."""
+    if not shared_file.exists():
+        return None
+    dry = np.load(shared_file)
+    if dry.shape != lagoon.shape:
+        return None
+    log.info("Flats dry-override from the shared lagoon model (%s)",
+             dt.datetime.fromtimestamp(shared_file.stat().st_mtime).date())
     return dry

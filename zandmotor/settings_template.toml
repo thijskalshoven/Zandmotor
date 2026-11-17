@@ -1,0 +1,44 @@
+# Your Zandmotor kite settings.
+#
+# Change them by double-clicking "Change settings" in your Zandmotor Kite
+# folder, or edit this file in TextEdit. Lines starting with # are notes; a
+# note you add yourself is lost when "Change settings" writes the file again,
+# so put lasting notes on a kite in its note = "..." line instead.
+# The next report uses whatever is saved here.
+
+[rider]
+# Your weight in kg: kite wind ranges shift with it.
+weight_kg = $weight_kg
+# The strongest gust you want to be out in, in knots. No kite is suggested
+# past it, except a storm kite (exempt_from_ceiling, below).
+skill_ceiling_kn = $skill_ceiling_kn
+# Optional, only shown in the report.
+$height_cm_line
+$board_line
+
+[riding]
+# The smallest patch of lagoon water worth riding, in hectares (a football
+# pitch is about 0.7 ha).
+min_rideable_ha = $min_rideable_ha
+
+# Your kites, one [[kite]] block each.
+#   size_m2          kite size in square metres (required)
+#   name, brand, color, year   optional, shown in the report
+#   wind_range_75kg  the manufacturer's wind range in knots for a 75 kg rider,
+#                    e.g. [11, 25]. Leave it out if you don't know it: the range
+#                    is then estimated from the size (marked "e" in the report)
+#   photo            a picture in the Kites folder, e.g. "Bandit 14.jpg" (optional)
+#   exempt_from_ceiling = true   a storm kite that may be flown past your skill
+#                    ceiling; such hours show as "Rideable, with caveats"
+#   min_wind_kn      only suggest this kite above this mean wind, whatever your weight
+#   note             anything you want to remember about it (not used)
+$kites
+# Wetsuit advice from the sea temperature, coldest first: the first block whose
+# below_c is above the water temperature wins, and the last one has no limit.
+$wetsuit
+# A cold, hard wind makes the water feel colder between runs: advise one step
+# warmer when the air is this many degrees colder than the water and the wind
+# blows at least this many knots.
+[wetsuit_chill]
+air_delta_c = $air_delta_c
+wind_kn = $wind_kn

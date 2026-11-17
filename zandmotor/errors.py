@@ -25,6 +25,18 @@ class HarmonicFitUnavailableError(ZandmotorError):
     measured data to fit it)."""
 
 
+class SettingsError(ZandmotorError):
+    """settings.toml can't be read or holds a value out of range. Raised
+    instead of falling back to the example rider, which would quietly give
+    advice for someone else's weight and kites."""
+
+
+class ModelBundleError(ZandmotorError):
+    """The shared lagoon model could not be exported or installed when that
+    was asked for explicitly (--export-model, --shared-model). The automatic
+    update never raises it: a failed check keeps the model already there."""
+
+
 class CalibrationIncompleteError(ZandmotorError):
     """Too many satellite requests failed during --calibrate to trust the
     record. Raised instead of fitting on what little arrived, so the cached

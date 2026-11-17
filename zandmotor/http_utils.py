@@ -1,4 +1,4 @@
-"""HTTP helper shared by the RWS and CDSE clients."""
+"""HTTP helper shared by the RWS and CDSE clients and the model download."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import threading
 import requests
 
 
-def post_with_deadline(url, deadline_s, connect_s=15, idle_s=30, **kw):
-    """POST and get the whole response within deadline_s seconds, however the
+def request_with_deadline(method, url, deadline_s, connect_s=15, idle_s=30, **kw):
+    """Send a request and get the whole response within deadline_s seconds, however the
     server misbehaves.
 
     requests' own timeout only bounds each wait for the next bytes, so a
@@ -25,7 +25,8 @@ def post_with_deadline(url, deadline_s, connect_s=15, idle_s=30, **kw):
 
     def work():
         try:
-            r = requests.post(url, timeout=(connect_s, idle_s), **kw)
+            # requests.post/get rather than request(), so tests can patch either
+            r = getattr(requests, method.lower())(url, timeout=(connect_s, idle_s), **kw)
             box["result"] = (r.status_code, r.content)
         except BaseException as e:          # handed to the caller below
             box["error"] = e
@@ -38,3 +39,8 @@ def post_with_deadline(url, deadline_s, connect_s=15, idle_s=30, **kw):
     if "error" in box:
         raise box["error"]
     return box["result"]
+
+
+def post_with_deadline(url, deadline_s, connect_s=15, idle_s=30, **kw):
+    """request_with_deadline for a POST."""
+    return request_with_deadline("POST", url, deadline_s, connect_s, idle_s, **kw)

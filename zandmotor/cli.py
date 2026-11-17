@@ -17,7 +17,8 @@ import requests
 from rasterio.warp import Resampling
 from scipy import ndimage
 
-from zandmotor.config import CACHE, CFG, HERE, TZ, UTC, log
+from zandmotor import model_bundle
+from zandmotor.config import CACHE, CFG, IS_CHECKOUT, TZ, USER_DIR, UTC, log
 from zandmotor.errors import ZandmotorError
 from zandmotor.flood import (
     FillDrain, compute_wet_masks, effective_level, fill_drain_series, probable_extent,
@@ -37,6 +38,8 @@ from zandmotor.lagoon_model.runtime import (
 from zandmotor.lagoon_model.types import LakeResponse, WindResponse, model_from_dict
 from zandmotor.outline import make_outline
 from zandmotor.rendering import class_png, png_uri, terrain_rgb
+from zandmotor.settings import apply_user_settings, settings_path
+from zandmotor.setup_wizard import ensure_user_dir, run_setup
 from zandmotor.terrain import (
     coastal_zone_mask, dem_age_days, fetch_ahn, overlay_coastal_dem, permanent_sea_mask,
     prepare_terrain,
@@ -63,6 +66,16 @@ def _source(name, when, now, detail="", stale_days=None):
             "detail": detail, "stale": stale_days is not None and days > stale_days}
 
 
+def _hint(fix):
+    """The end of a warning about the lagoon model's age or fit. In a checkout,
+    or a copy that fits its own model, the fix is a command. Everyone else gets
+    the maintainer's shared model, which they can't refit, so there it says
+    that instead of pointing at a command they can't run."""
+    if IS_CHECKOUT or model_bundle.is_local():
+        return fix
+    return "The shared lagoon model updates by itself when a newer one is published."
+
+
 def _parse_args():
     ap = argparse.ArgumentParser(description="Zandmotor lagoon nowcast for kitesurfing")
     ap.add_argument("--hours", type=int, default=8, help="hours ahead (default 8)")
@@ -71,7 +84,17 @@ def _parse_args():
                     help="refit the lagoon's wetness model from satellite images")
     ap.add_argument("--outline", nargs="?", const="auto", choices=["auto", "sentinel", "osm"],
                     help="trace the lagoon outline (default: auto)")
-    ap.add_argument("--out", default="zandmotor_lagoon.html")
+    ap.add_argument("--out", default="zandmotor_lagoon.html",
+                    help="report file, relative to your Zandmotor folder")
+    ap.add_argument("--setup", action="store_true",
+                    help="enter your weight and kites (writes settings.toml)")
+    ap.add_argument("--install-launchers", action="store_true",
+                    help="create the Zandmotor Kite folder with double-click launchers")
+    ap.add_argument("--shared-model", nargs="?", const="", metavar="ZIP",
+                    help="install the published lagoon model now (or this snapshot zip) and "
+                         "follow it from then on, also after a local --calibrate")
+    ap.add_argument("--export-model", metavar="ZIP",
+                    help="write the lagoon model snapshot for publishing, then stop")
     ap.add_argument("--no-open", action="store_true", help="don't open the browser")
     ap.add_argument("-v", "--verbose", action="store_true")
     return ap.parse_args()
@@ -100,7 +123,7 @@ def _load_terrain_and_outline(args, grid, now, warnings, sources):
         if dem_age is not None and dem_age > CFG["dem_max_age_days"]:
             warnings.append(f"Cached AHN terrain is {dem_age:.0f} days old. Zandmotor is built "
                             "to reshape, and this DEM decides which of the traced outline counts "
-                            "as water - delete cache/ahn_dtm.tif to refetch.")
+                            "as water. " + _hint("Delete cache/ahn_dtm.tif to refetch."))
             terrain_note += f" (cached {dem_age:.0f} days ago)"
     ring, props = (None, None) if args.outline else load_lagoon_polygon()
     if ring is None:
@@ -115,16 +138,17 @@ def _load_terrain_and_outline(args, grid, now, warnings, sources):
     if ring is None:
         ring = CFG["lagoon_polygon"]
         warnings.append("Could not trace the lagoon, so a rough placeholder outline is "
-                        "used. Run with --outline, or draw it on geojson.io and save it "
-                        "as lagoon.geojson.")
+                        "used. " + _hint("Run with --outline, or draw it on geojson.io and "
+                                         "save it as lagoon.geojson."))
     elif props.get("source") == "openstreetmap":
-        warnings.append("Lagoon outline comes from OpenStreetMap and may be outdated. "
-                        "Run --outline sentinel for one traced from a recent satellite image.")
+        warnings.append("Lagoon outline comes from OpenStreetMap and may be outdated. " +
+                        _hint("Run --outline sentinel for one traced from a recent "
+                              "satellite image."))
     elif props.get("image_time"):
         age = (now - parse_iso_datetime(props["image_time"])).days
         if age > 60:
-            warnings.append(f"Lagoon outline is from a satellite image {age} days old. "
-                            "Run --outline to refresh it.")
+            warnings.append(f"Lagoon outline is from a satellite image {age} days old. " +
+                            _hint("Run --outline to refresh it."))
     if props and props.get("image_time"):
         sources.append(_source("Lagoon outline", parse_iso_datetime(props["image_time"]), now,
                                "satellite image it was traced from", 60))
@@ -140,7 +164,8 @@ def _load_terrain_and_outline(args, grid, now, warnings, sources):
     basin, found = basin_mask(grid, lagoon, z_raw)
     if not found:
         warnings.append("No lagoon basin yet, so the probable water edge can't reach beyond "
-                        f"the outline. Run --outline to start {CFG['lagoon_basin_file']}.")
+                        "the outline. " + _hint(f"Run --outline to start "
+                                                f"{CFG['lagoon_basin_file']}."))
     z_heights, covered = overlay_coastal_dem(z_raw, grid)
     if covered:
         terrain_note += f" + {CFG['coastal_dem_label']} where it has data"
@@ -173,10 +198,10 @@ def _load_or_fit_lagoon_model(args, grid, lagoon, basin, ring, z_raw, now, warni
     satellite dry-ground override for the flats, and loads (or with
     --calibrate refits) the fill-and-drain parameters. Returns (lagoon_model,
     freq, dry_override, fill_fit)."""
-    freq_file = CACHE / "wetness_frequency.npy"
-    confidence_file = CACHE / "wetness_confidence.npy"
-    response_file = CACHE / "lagoon_response.json"
-    meta_file = CACHE / "wetness_meta.json"
+    freq_file = CACHE / CFG["wetness_frequency_file"]
+    confidence_file = CACHE / CFG["wetness_confidence_file"]
+    response_file = CACHE / CFG["lagoon_response_file"]
+    meta_file = CACHE / CFG["wetness_meta_file"]
     fingerprint = wetness_fingerprint(lagoon, ring, basin)
     sea_record = None
     if args.calibrate:
@@ -215,7 +240,7 @@ def _load_or_fit_lagoon_model(args, grid, lagoon, basin, ring, z_raw, now, warni
         elif stored != fingerprint:
             warnings.append("The lagoon outline or basin has changed since the wetness map was "
                             "fitted, so the map no longer describes this footprint and is being "
-                            "ignored. Run --calibrate to refit.")
+                            "ignored. " + _hint("Run --calibrate to refit."))
         else:
             freq = np.load(freq_file)
             if freq.shape == lagoon.shape:
@@ -240,11 +265,11 @@ def _load_or_fit_lagoon_model(args, grid, lagoon, basin, ring, z_raw, now, warni
                             f"(r={lagoon_model.sea_r:.2f}).")
         if age > 90:
             warnings.append(f"Lagoon response model ({mode_txt}, fitted {age} days ago) "
-                            "may be stale; run --calibrate to refit.")
+                            "may be stale. " + _hint("Run --calibrate to refit."))
         if not lagoon_model.obs:
             warnings.append("The lagoon record predates the seen-pixel rules and the per-track "
                             "radar calibration, so its areas mix two radar tracks that read ~2 ha "
-                            "apart. Run --calibrate to rebuild it.")
+                            "apart. " + _hint("Run --calibrate to rebuild it."))
         # The lagoon's size only moves when new images are pulled in, so how old
         # the newest one is says how current the "Lagoon water" figure is.
         newest = latest_observation(lagoon_model, now)
@@ -254,16 +279,16 @@ def _load_or_fit_lagoon_model(args, grid, lagoon, basin, ring, z_raw, now, warni
                                (f"newest usable image ({describe_observation(newest)}); "
                                 if newest else "") +
                                f"last pulled "
-                               f"{parse_iso_datetime(lagoon_model.fitted).astimezone(TZ):%d %b} "
-                               "with --calibrate", stale))
+                               f"{parse_iso_datetime(lagoon_model.fitted).astimezone(TZ):%d %b}" +
+                               (" with --calibrate" if IS_CHECKOUT else ""), stale))
         if latest is not None and (now - latest).days > stale:
             warnings.append(f"The newest satellite image of the lagoon is "
                             f"{(now - latest).days} days old, so the lagoon size may be out "
-                            "of date. Run --calibrate to pull in recent images.")
+                            "of date. " + _hint("Run --calibrate to pull in recent images."))
     else:
         warnings.append("No satellite-fitted lagoon response model yet; showing the "
-                        "whole traced outline as wet until one exists. Run --calibrate "
-                        "to fit one from a year of satellite images.")
+                        "whole traced outline as wet until one exists. " +
+                        _hint("Run --calibrate to fit one from a year of satellite images."))
 
     dry_override = flats_dry_override(grid, lagoon, now)
     if dry_override is None:
@@ -289,8 +314,8 @@ def _load_or_fit_lagoon_model(args, grid, lagoon, basin, ring, z_raw, now, warni
     fill_fit, why_not = FillDrainFit.load(fill_file, fingerprint)
     if why_not and lagoon_model is not None and lagoon_model.mode == "lake":
         warnings.append(f"The lagoon's fill-and-drain uses its default drain time "
-                        f"({fill_fit.drain_days:g} days) because there is {why_not}. Run "
-                        "--calibrate to fit it to the satellite record.")
+                        f"({fill_fit.drain_days:g} days) because there is {why_not}. " +
+                        _hint("Run --calibrate to fit it to the satellite record."))
     return lagoon_model, freq, dry_override, fill_fit
 
 
@@ -329,8 +354,8 @@ def _lagoon_now(lagoon_model, freq, now, water, wind, warnings):
         warnings.append(f"Since the newest lagoon image ({when.astimezone(TZ):%d %b}), "
                         f"{fill['rain_mm']:.0f} mm of rain fell. The lagoon once filled to "
                         "about 13 ha after rain without a surge (May 2026), which the map "
-                        "can't predict, so it may be bigger than shown. Run --calibrate to "
-                        "check newer images.")
+                        "can't predict, so it may be bigger than shown. " +
+                        _hint("Run --calibrate to check newer images."))
         label += " · may have filled since"
     log.info("Lagoon area (lake mode): %.2f ha, %s image of %s%s", area,
              describe_observation(latest), when.date(),
@@ -398,7 +423,7 @@ def _fit_caption(fit):
     """One sentence on the fill-and-drain parameters and how they were set."""
     if fit.fitted is None:
         return (f"Between images the lagoon fills on surges and drains back with a default "
-                f"{fit.drain_days:g}-day drain time (not yet fitted: run --calibrate).")
+                f"{fit.drain_days:g}-day drain time (not yet fitted).")
     return (f"Between images it fills on surges and drains back ({fit.drain_days:g}-day drain "
             f"time, fitted {parse_iso_datetime(fit.fitted).astimezone(TZ):%d %b}). Replayed "
             f"from image to image, that misses the next image by {fit.mae_ha:.1f} ha on "
@@ -632,7 +657,7 @@ def _search_windows_and_tides(now, water, wind, daylight, lagoon_water, end):
 
 def _render(args, frames, grid, ring, water, terrain_note, warnings, z, windows, tides,
             lagoon_obs, lagoon_label, lagoon_varies, sources, lagoon_trend):
-    out = HERE / args.out
+    out = USER_DIR / args.out
     write_html(out, frames, grid, ring, water.location, terrain_note, warnings,
                png_uri(terrain_rgb(z)), windows, tides, lagoon_obs, lagoon_label,
                lagoon_varies, sources, lagoon_trend)
@@ -641,10 +666,73 @@ def _render(args, frames, grid, ring, water, terrain_note, warnings, z, windows,
         webbrowser.open(out.as_uri())
 
 
+def install_launchers():
+    """The Zandmotor Kite folder with the double-click launchers, and one on
+    the Desktop. install.sh runs this after installing the app; the launchers
+    ship inside the package so they change with the code. Files made here,
+    not downloaded by a browser, carry no quarantine flag, so macOS opens
+    them without the "unidentified developer" block."""
+    ensure_user_dir()
+    src = pathlib.Path(__file__).resolve().parent / "launchers"
+    for f in sorted(src.glob("*.command")):
+        dest = USER_DIR / f.name
+        dest.write_text(f.read_text())
+        dest.chmod(0o755)
+    desktop = pathlib.Path.home() / "Desktop"
+    if desktop.is_dir():
+        link = desktop / "Zandmotor.command"
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(USER_DIR / "Zandmotor.command")
+    print(f"Launchers are in {USER_DIR}" + (", with a Zandmotor shortcut on the Desktop."
+                                           if desktop.is_dir() else "."))
+
+
+def _shared_model(args, warnings, sources, now):
+    """Brings the shared lagoon model up to date: always in an installed copy,
+    in a checkout only when asked (there it is the maintainer's own)."""
+    if args.shared_model is None and IS_CHECKOUT:
+        return
+    manifest, note = model_bundle.update_if_newer(force=args.shared_model is not None,
+                                                  source=args.shared_model or None)
+    if note:
+        warnings.append(note)
+    if model_bundle.is_local():
+        return
+    sources.append(_source("Shared lagoon model",
+                           parse_iso_datetime(manifest["created"]) if manifest else None, now,
+                           "published by the maintainer; updates by itself"))
+
+
 def main():
     args = _parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(message)s")
+    if not args.verbose:
+        # GDAL's own notes (deprecated drivers; GeoTIFF CRS keys the rasterio 1.5.2
+        # wheel can't match to its PROJ database, with identical results) are noise
+        # in a Terminal window opened by a double-click
+        logging.getLogger("rasterio").setLevel(logging.ERROR)
+
+    try:
+        if args.install_launchers:
+            install_launchers()
+            return
+        if args.export_model:
+            model_bundle.export_bundle(pathlib.Path(args.export_model).expanduser().resolve())
+            return
+        if args.setup or (not IS_CHECKOUT and not settings_path().exists()
+                          and sys.stdin.isatty()):
+            ensure_user_dir()
+            try:
+                run_setup()
+            except (KeyboardInterrupt, EOFError):
+                sys.exit("\nSetup cancelled; nothing was saved.")
+            if args.setup:
+                return
+        has_settings = apply_user_settings()
+    except ZandmotorError as e:
+        sys.exit(str(e))
 
     if args.calibrate and not (os.environ.get("CDSE_CLIENT_ID") and os.environ.get("CDSE_CLIENT_SECRET")):
         sys.exit("Set CDSE_CLIENT_ID and CDSE_CLIENT_SECRET for --calibrate (see top of file).")
@@ -656,10 +744,19 @@ def main():
     grid = make_grid(CFG["bbox_wgs84"], CFG["grid_res_m"])
     warnings = []
     sources = []
-    CACHE.mkdir(exist_ok=True)
+    if not has_settings:
+        warnings.append("These kite suggestions are for an example rider with two example "
+                        "kites. Double-click \"Change settings\" in your Zandmotor Kite folder "
+                        "(or run zandmotor --setup) to enter your own.")
+    CACHE.mkdir(parents=True, exist_ok=True)
+    USER_DIR.mkdir(parents=True, exist_ok=True)
     prune_cache()
 
     try:
+        _shared_model(args, warnings, sources, now)
+        if not IS_CHECKOUT and (args.calibrate or args.outline):
+            # a model fitted here must not be overwritten by the shared one
+            model_bundle.mark_local()
         z_raw, ring, lagoon, basin, terrain_note = _load_terrain_and_outline(
             args, grid, now, warnings, sources)
         lagoon_model, freq, dry_override, fill_fit = _load_or_fit_lagoon_model(

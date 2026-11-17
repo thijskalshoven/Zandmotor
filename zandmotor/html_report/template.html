@@ -53,7 +53,7 @@ svg.chart{width:100%;height:120px;display:block;margin-top:6px}
 .quiver h2{font-family:"Barlow Semi Condensed",Barlow,sans-serif;font-size:19px;margin:0 0 12px}
 .q-item{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}
 .q-item:last-of-type{border-bottom:none}
-.q-item img{width:56px;height:56px;object-fit:cover;border-radius:8px;background:var(--line);flex-shrink:0}
+.q-item img,.q-noimg{width:56px;height:56px;object-fit:cover;border-radius:8px;background:var(--line);flex-shrink:0}
 .q-info{flex:1;min-width:0}
 .q-name{font-weight:600;font-size:15px}
 .q-range{color:var(--muted);font-size:13px}
@@ -221,14 +221,16 @@ const $ = id => document.getElementById(id);
 const words = {go:'Looks rideable', maybe:'Rideable, with caveats', no:'Not rideable'};
 const qWords = {ideal:'Ideal', marginal:'Marginal', off:'Not this one'};
 function initQuiver(){
-  $('riderInfo').textContent = `${D.rider.weight_kg}kg, ${D.rider.height_cm}cm on a ${D.rider.board}`;
+  // height and board are optional in settings.toml
+  $('riderInfo').textContent = `${D.rider.weight_kg}kg` +
+    (D.rider.height_cm ? `, ${D.rider.height_cm}cm` : '') + (D.rider.board ? ` on a ${D.rider.board}` : '');
   $('ceilingInfo').textContent = D.rider.skill_ceiling_kn;
   $('quiverList').innerHTML = D.quiver_meta.map((k,i)=>`
     <div class="q-item">
-      <img src="${k.image}" alt="${k.brand} ${k.name} ${k.size_m2}m²">
+      ${k.image ? `<img src="${k.image}" alt="${k.brand} ${k.name} ${k.size_m2}m²">` : '<span class="q-noimg"></span>'}
       <div class="q-info">
-        <div class="q-name">${k.size_m2}m² ${k.brand} ${k.name}</div>
-        <div class="q-range">${k.color}, ${k.year} &middot; <span id="q-range-${i}"></span> kn<span id="q-flag-${i}"></span></div>
+        <div class="q-name">${[k.size_m2 + 'm²', k.brand, k.name].filter(Boolean).join(' ')}</div>
+        <div class="q-range">${[k.color, k.year].filter(Boolean).join(', ')}${k.color || k.year ? ' &middot; ' : ''}<span id="q-range-${i}"></span> kn<span id="q-flag-${i}"></span></div>
       </div>
       <span class="q-badge" id="q-badge-${i}"></span>
     </div>`).join('');

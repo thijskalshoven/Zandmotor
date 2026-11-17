@@ -1,5 +1,26 @@
+import pytest
+
 from zandmotor.config import CFG
 from zandmotor.kiting import kite_advice, kite_wind_range, quiver_advice
+
+# The storm-kite tests below were written against this rider and quiver, which
+# used to be CFG's own; CFG now ships an example rider (settings.toml holds the
+# real one), so they set it explicitly.
+RIDER = {"weight_kg": 88, "height_cm": 192, "board": "North Prime 141x41",
+         "skill_ceiling_kn": 46}
+QUIVER = [
+    {"name": "Drifter", "size_m2": 4.5, "wind_range_75kg": (28, 40),
+     "exempt_from_ceiling": True, "min_wind_kn": 28},
+    {"name": "Drifter", "size_m2": 7, "wind_range_75kg": None},
+    {"name": "Switchblade", "size_m2": 10, "wind_range_75kg": (11, 25)},
+    {"name": "Bandit", "size_m2": 14, "wind_range_75kg": (8, 20)},
+]
+
+
+@pytest.fixture
+def storm_quiver(monkeypatch):
+    monkeypatch.setitem(CFG, "rider", RIDER)
+    monkeypatch.setitem(CFG, "quiver", QUIVER)
 
 
 def test_kite_wind_range_uses_manufacturer_chart_when_given():
@@ -95,7 +116,7 @@ def _storm(result):
     return next(k for k in result["kites"] if k["size_m2"] == 4.5)
 
 
-def test_storm_kite_range_starts_at_its_floor_for_this_rider():
+def test_storm_kite_range_starts_at_its_floor_for_this_rider(storm_quiver):
     storm = next(k for k in CFG["quiver"] if k.get("min_wind_kn") is not None)
     lo, hi, estimated, capped = kite_wind_range(storm, CFG["rider"])
     # the 28-40 kn chart would shift to 33.9-45.9 kn at 88 kg; the floor keeps 28
@@ -103,7 +124,7 @@ def test_storm_kite_range_starts_at_its_floor_for_this_rider():
     assert hi > 40 and not capped
 
 
-def test_storm_kite_is_picked_once_the_7m_is_overpowered():
+def test_storm_kite_is_picked_once_the_7m_is_overpowered(storm_quiver):
     # under the 46 kn ceiling a storm-kite hour is an ordinary "go"
     result = quiver_advice((36.0, 42.0, 270.0, 12.0), CFG["rider"])
     assert result["best_size_m2"] == 4.5 and _storm(result)["status"] == "ideal"
@@ -112,7 +133,7 @@ def test_storm_kite_is_picked_once_the_7m_is_overpowered():
     assert quiver_advice((29.0, 33.0, 270.0, 12.0), CFG["rider"])["best_size_m2"] == 7
 
 
-def test_storm_kite_past_the_46_kn_ceiling_is_maybe():
+def test_storm_kite_past_the_46_kn_ceiling_is_maybe(storm_quiver):
     result = quiver_advice((40.0, 47.0, 270.0, 12.0), CFG["rider"])
     assert result["best_size_m2"] == 4.5 and result["past_ceiling"]
     wind_txt, verdict, notes = kite_advice((40.0, 47.0, 270.0, 12.0), 5.0, result)
@@ -120,21 +141,21 @@ def test_storm_kite_past_the_46_kn_ceiling_is_maybe():
     assert any("storm kite only" in n for n in notes)
 
 
-def test_storm_kite_is_off_at_or_below_28_kn_with_no_marginal_band():
+def test_storm_kite_is_off_at_or_below_28_kn_with_no_marginal_band(storm_quiver):
     for w in [(28.0, 30.0, 270.0, 12.0),     # exactly 28: not "above 28"
               (26.0, 27.0, 270.0, 12.0),     # would be "marginal" without the floor
               (24.0, 31.0, 270.0, 12.0)]:    # gusty, but the mean is too light
         assert _storm(quiver_advice(w, CFG["rider"]))["status"] == "off"
 
 
-def test_gusts_past_the_ceiling_below_28_kn_mean_is_no():
+def test_gusts_past_the_ceiling_below_28_kn_mean_is_no(storm_quiver):
     # the storm kite's 28 kn floor is on the mean, so it can't take these gusts
     result = quiver_advice((26.0, 48.0, 270.0, 12.0), CFG["rider"])
     assert result["over_ceiling"] and result["best"] is None
     assert kite_advice((26.0, 48.0, 270.0, 12.0), 5.0, result)[1] == "no"
 
 
-def test_best_kite_carries_its_size_when_names_repeat():
+def test_best_kite_carries_its_size_when_names_repeat(storm_quiver):
     # 26 kn gusting 27: the 7 m Drifter fits, not the 4.5 m storm Drifter
     result = quiver_advice((26.0, 27.0, 270.0, 12.0), CFG["rider"])
     assert result["best"] == "Drifter" and result["best_size_m2"] == 7

@@ -18,9 +18,10 @@ def write_html(path, frames, grid, lagoon_ring, location, terrain_note, warnings
     template = _TEMPLATE_PATH.read_text(encoding="utf-8")
     lats = [p[1] for p in lagoon_ring]
     lons = [p[0] for p in lagoon_ring]
-    quiver_meta = [{"name": k["name"], "size_m2": k["size_m2"], "brand": k["brand"],
-                    "color": k["color"], "year": k["year"],
-                    "image": quiver_image_uri(k["image"], warnings)} for k in CFG["quiver"]]
+    # brand, colour, year and photo are optional in settings.toml
+    quiver_meta = [{"name": k["name"], "size_m2": k["size_m2"], "brand": k.get("brand") or "",
+                    "color": k.get("color") or "", "year": k.get("year"),
+                    "image": quiver_image_uri(k.get("image"), warnings)} for k in CFG["quiver"]]
     data = {"bounds": grid.latlon_bounds, "frames": frames, "terrain": terrain_uri,
             "lagoon": [[lat, lon] for lon, lat in lagoon_ring],
             "lagoon_bounds": [[min(lats), min(lons)], [max(lats), max(lons)]],

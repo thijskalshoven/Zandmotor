@@ -1,11 +1,18 @@
-"""Configuration: everything you might want to tweak is here."""
+"""Configuration: everything you might want to tweak is here.
+
+The rider, the quiver and the wetsuit table below are only defaults: each
+user's own values come from settings.toml (see zandmotor.settings), so other
+people can install this without editing code."""
 
 from __future__ import annotations
 
 import datetime as dt
 import logging
+import os
 import pathlib
 from zoneinfo import ZoneInfo
+
+import platformdirs
 
 CFG = {
     # Map area (lon_min, lat_min, lon_max, lat_max), covers the whole Zandmotor
@@ -21,13 +28,20 @@ CFG = {
     "lagoon_polygon": [(4.186, 52.055), (4.204, 52.055), (4.206, 52.064),
                        (4.190, 52.066), (4.186, 52.055)],
 
-    # Filenames (all relative to HERE, the project root)
+    # Filenames (relative to DATA unless marked; see the layouts at the bottom)
     "lagoon_geojson_file": "lagoon.geojson",
     "lagoon_basin_file": "lagoon_basin.geojson",   # the lagoon's largest extent seen
     "outline_check_image_file": "lagoon_outline_check.png",
     "ahn_dtm_file": "ahn_dtm.tif",           # relative to CACHE
     "flats_dry_cache_glob": "flats_dry_*.npy",     # relative to CACHE
     "flats_dry_cache_pattern": "flats_dry_{date}.npy",  # relative to CACHE
+    "flats_dry_shared_file": "shared_dry_override.npy",  # relative to CACHE: the newest
+                                             # mask, carried by the shared model for copies
+                                             # without a Copernicus account
+    "lagoon_response_file": "lagoon_response.json",     # relative to CACHE: the lagoon
+    "wetness_frequency_file": "wetness_frequency.npy",  # model --calibrate fits, which
+    "wetness_confidence_file": "wetness_confidence.npy",  # the shared model snapshot
+    "wetness_meta_file": "wetness_meta.json",           # carries (see model_bundle)
 
     # Terrain
     "ahn_wcs": "https://service.pdok.nl/rws/ahn/wcs/v1_0",
@@ -160,6 +174,10 @@ CFG = {
     "shore_normal_deg": 300,                # direction the coast faces (approx.)
 
     # Personal kite quiver: which of your own kites fits the current wind.
+    # rider, quiver and the wetsuit table are DEFAULTS only - an example rider
+    # with two example kites. Each user's own values come from settings.toml
+    # (zandmotor.settings, written by `zandmotor --setup`), which also keeps the
+    # notes on individual kites.
     # Wind ranges are manufacturer charts at a 75 kg reference rider, shifted
     # to "rider"/weight_kg below. The shift moves the range's CENTRE by
     # weight/75 (per the standard size formula size_m2 = weight_kg*2.2/wind_kn,
@@ -167,37 +185,28 @@ CFG = {
     # its WIDTH: how wide a window a kite has is a depower/skill property, not
     # something that stretches because the rider is heavier. Scaling both ends
     # instead used to hand out a 7 m good to 37 kn.
-    # No manufacturer chart could be found for the 2014 Drifter 7m, so its
-    # range is estimated from that same formula instead of a real chart -
-    # treat it as the roughest of the lot and adjust once you've flown it.
+    # A kite without a manufacturer chart (wind_range_75kg None) gets a range
+    # estimated from that same formula - the roughest of the lot.
     # Every range top is then capped at skill_ceiling_kn: what a kite can
     # technically hold and what you want to be out in are different numbers.
-    # The ceiling is 46 kn (it was 28 kn until 2026-11-16). At 46 no kite's
-    # shifted range reaches it - the 4.5m Drifter tops out at 45.9 kn for 88 kg -
-    # so the cap only bites on gusts above 46 kn.
-    # exempt_from_ceiling opts one kite out of that cap. With the 28 kn ceiling the
-    # 4.5m Drifter, which only makes sense above 28 kn, was left a 28-28 kn range
-    # that was never picked. Hours past the ceiling where only it fits come out as
-    # "maybe", not "go"; below the ceiling a storm-kite hour is an ordinary "go".
-    # min_wind_kn is a hard floor on the MEAN wind, set for this rider directly:
+    # exempt_from_ceiling opts a storm kite out of that cap. With a 28 kn ceiling
+    # a 4.5 m storm kite that only makes sense above 28 kn was left a 28-28 kn
+    # range that was never picked. Hours past the ceiling where only it fits come
+    # out as "maybe", not "go"; below the ceiling a storm-kite hour is an ordinary
+    # "go".
+    # min_wind_kn is a hard floor on the MEAN wind, set for the rider directly:
     # the kite is only considered above it, and neither the weight shift nor the
-    # "marginal" buffer moves it. Without it the Drifter's 28-40 kn chart shifted
+    # "marginal" buffer moves it. Without it a 28-40 kn storm-kite chart shifted
     # to 33.9-45.9 kn for 88 kg, so it was ignored at 28-29 kn and only "marginal"
     # up to 33.9 kn.
-    "rider": {"weight_kg": 88, "height_cm": 192, "board": "North Prime 141x41",
-              "skill_ceiling_kn": 46},
+    "rider": {"weight_kg": 75, "height_cm": None, "board": "", "skill_ceiling_kn": 35},
     "quiver": [
-        {"name": "Drifter", "brand": "Cabrinha", "size_m2": 4.5, "color": "Orange/yellow",
-         "year": 2017, "image": "Drifter 4,5.jpg", "wind_range_75kg": (28, 40),
-         "exempt_from_ceiling": True, "min_wind_kn": 28},
-        {"name": "Drifter", "brand": "Cabrinha", "size_m2": 7, "color": "Orange",
-         "year": 2014, "image": "Drifter 7.png", "wind_range_75kg": None},
-        {"name": "Switchblade", "brand": "Cabrinha", "size_m2": 10, "color": "Green",
-         "year": 2014, "image": "Switchblade 10.jpg", "wind_range_75kg": (11, 25)},
-        {"name": "Bandit", "brand": "F-One", "size_m2": 14, "color": "Blue",
-         "year": 2019, "image": "Bandit 14.jpg", "wind_range_75kg": (8, 20)},
+        {"name": "Example kite", "brand": "", "size_m2": 9, "color": "", "year": None,
+         "image": None, "wind_range_75kg": (14, 26)},
+        {"name": "Example kite", "brand": "", "size_m2": 12, "color": "", "year": None,
+         "image": None, "wind_range_75kg": (10, 21)},
     ],
-    "kite_images_dir": "Kites",              # relative to this script
+    "kite_images_dir": "Kites",              # relative to USER_DIR
     "kite_thumb_px": 112,                    # photos are shown at 56 px; embed at 2x for
                                              # retina and no more. The full-size originals
                                              # were 3.4 MB of a 4.6 MB output file.
@@ -361,13 +370,46 @@ CFG = {
     "wetsuit_chill_wind_kn": 18.0,
 
     "timezone": "Europe/Amsterdam",
-    "cache_dir": "cache",
+    "cache_dir": "cache",                   # relative to DATA
+
+    # Installed copies (see the layouts below)
+    "user_dir_name": "Zandmotor Kite",      # folder in the home folder for settings,
+                                             # kite photos and the report: visible in
+                                             # Finder, unlike ~/Library
+    "settings_file": "settings.toml",       # relative to USER_DIR
+    # The shared lagoon model (zandmotor.model_bundle). A new user has no Copernicus
+    # account to --calibrate with, so the maintainer's calibrated files are published
+    # as the rolling "model" pre-release and installed copies download them.
+    "model_manifest_url": "https://github.com/thijskalshoven/Zandmotor/releases/"
+                          "download/model/manifest.json",
+    "model_bundle_url": "https://github.com/thijskalshoven/Zandmotor/releases/"
+                        "download/model/zandmotor-model.zip",
+    "model_check_hours": 6,                 # look for a newer snapshot at most this often
+    "model_request_deadline_s": 300,        # whole-download limit (~30 MB)
+    "model_marker_local": "LOCAL_MODEL",    # in DATA: this copy calibrated its own model,
+                                             # so the shared one must not overwrite it
 }
 
-# Project root (where cache/, Kites/, lagoon.geojson, and the output HTML live) -
-# two levels up from this file: zandmotor/config.py -> zandmotor/ -> project root.
-HERE = pathlib.Path(__file__).resolve().parent.parent
-CACHE = HERE / CFG["cache_dir"]
+# Two layouts. In a git checkout (the maintainer, CI, the tests) everything stays
+# where it always was, in the project root. In an installed copy the code sits in
+# site-packages, which is no place for a user's files: settings, kite photos and
+# the report go to a visible ~/Zandmotor Kite, and the lagoon model and download
+# cache to the user cache folder (~/Library/Caches/zandmotor on a Mac).
+# ZANDMOTOR_HOME moves USER_DIR in either layout.
+def resolve_layout(code_root, env=os.environ, home=None):
+    """(is_checkout, user_dir, data) for code living in code_root."""
+    code_root = pathlib.Path(code_root)
+    is_checkout = (code_root / ".git").exists() and (code_root / "pyproject.toml").exists()
+    home = pathlib.Path(home) if home else pathlib.Path.home()
+    user_dir = pathlib.Path(env.get("ZANDMOTOR_HOME") or
+                            (code_root if is_checkout else home / CFG["user_dir_name"]))
+    data = code_root if is_checkout else pathlib.Path(platformdirs.user_cache_dir("zandmotor"))
+    return is_checkout, user_dir.expanduser(), data
+
+
+CODE_ROOT = pathlib.Path(__file__).resolve().parent.parent
+IS_CHECKOUT, USER_DIR, DATA = resolve_layout(CODE_ROOT)
+CACHE = DATA / CFG["cache_dir"]
 TZ = ZoneInfo(CFG["timezone"])
 UTC = dt.timezone.utc
 log = logging.getLogger("zandmotor")

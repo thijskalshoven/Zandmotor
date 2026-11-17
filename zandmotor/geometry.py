@@ -15,7 +15,7 @@ from rasterio.features import rasterize
 from rasterio.transform import Affine, from_bounds
 from scipy import ndimage
 
-from zandmotor.config import CFG, HERE
+from zandmotor.config import CFG, DATA
 
 
 @dataclass
@@ -68,12 +68,12 @@ def crop_grid(grid, mask, pad_px):
 
 def load_lagoon_polygon():
     """Returns (ring, properties) from lagoon.geojson, or (None, None)."""
-    return _load_ring(HERE / CFG["lagoon_geojson_file"])
+    return _load_ring(DATA / CFG["lagoon_geojson_file"])
 
 
 def load_basin_polygon():
     """Returns (ring, properties) from lagoon_basin.geojson, or (None, None)."""
-    return _load_ring(HERE / CFG["lagoon_basin_file"])
+    return _load_ring(DATA / CFG["lagoon_basin_file"])
 
 
 def basin_mask(grid, lagoon, z_raw):

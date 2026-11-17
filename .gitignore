@@ -11,3 +11,8 @@ demo_outline_check.png
 *.egg-info/
 build/
 dist/
+settings.toml
+model_manifest.json
+model_checked
+LOCAL_MODEL
+.staging/

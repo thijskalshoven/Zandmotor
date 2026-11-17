@@ -12,7 +12,7 @@ from rasterio.warp import Resampling, reproject
 from scipy import ndimage
 from skimage.morphology import reconstruction
 
-from zandmotor.config import CACHE, CFG, HERE, log
+from zandmotor.config import CACHE, CFG, DATA, log
 from zandmotor.errors import NoSeaFoundError, TerrainFetchError
 
 
@@ -42,7 +42,7 @@ def dem_age_days():
 
 def fetch_ahn(grid) -> np.ndarray:
     """Download AHN DTM for the grid area (cached) and put it on the grid."""
-    CACHE.mkdir(exist_ok=True)
+    CACHE.mkdir(parents=True, exist_ok=True)
     cache_file = CACHE / CFG["ahn_dtm_file"]
     if not cache_file.exists():
         to_rd = Transformer.from_crs(3857, 28992, always_xy=True)
@@ -93,7 +93,7 @@ def overlay_coastal_dem(z, grid):
     name = CFG["coastal_dem"]
     if not name:
         return z, 0.0
-    f = HERE / name
+    f = DATA / name
     if not f.exists():
         log.warning("Coastal DTM %s not found; using AHN heights only.", name)
         return z, 0.0

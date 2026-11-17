@@ -7,7 +7,7 @@ import io
 
 from PIL import Image
 
-from zandmotor.config import CFG, HERE
+from zandmotor.config import CFG, USER_DIR
 from zandmotor.wind import compass, shore_class
 
 
@@ -67,8 +67,12 @@ def quiver_image_uri(filename, warnings):
 
     Downscaled to kite_thumb_px before embedding: the originals are up to
     1.6 MB each and are displayed at 56 px, which put 3.4 MB of invisible
-    detail into a 4.6 MB page."""
-    path = HERE / CFG["kite_images_dir"] / filename
+    detail into a 4.6 MB page.
+    A kite with no photo set (None or "") gets the blank thumbnail without a
+    warning: photos are optional in settings.toml."""
+    if not filename:
+        return ""
+    path = USER_DIR / CFG["kite_images_dir"] / filename
     try:
         img = Image.open(io.BytesIO(path.read_bytes()))
     except (OSError, ValueError):

@@ -11,7 +11,7 @@ import requests
 from pyproj import Transformer
 from scipy import ndimage
 
-from zandmotor.config import CFG, HERE, TZ, log
+from zandmotor.config import CFG, DATA, TZ, log
 from zandmotor.geometry import load_basin_polygon, mask_to_ring, polygon_mask
 from zandmotor.rendering import outline_preview, terrain_rgb
 from zandmotor.satellite.client import cdse_token
@@ -87,7 +87,7 @@ def _write_ring(name, ring, props):
     gj = {"type": "FeatureCollection", "features": [{
         "type": "Feature", "properties": props,
         "geometry": {"type": "Polygon", "coordinates": [[list(p) for p in ring]]}}]}
-    (HERE / name).write_text(json.dumps(gj, indent=1))
+    (DATA / name).write_text(json.dumps(gj, indent=1))
 
 
 def save_outline(ring, props):
@@ -147,7 +147,7 @@ def outline_from_sentinel(grid, now):
         stretched = np.clip(rgb / 0.25 * 255, 0, 255).astype("uint8")
         title = (f"Sentinel-2 {t.astimezone(TZ):%d %b %Y %H:%M}, water {h:+.2f} m NAP, "
                  f"lagoon {m.sum() * grid.cell_area_m2 / 1e4:.1f} ha")
-        outline_preview(stretched, ring, grid, title, HERE / CFG["outline_check_image_file"])
+        outline_preview(stretched, ring, grid, title, DATA / CFG["outline_check_image_file"])
         return ring, {"source": "sentinel-2", "image_time": t.isoformat(),
                       "water_level_m_nap": round(h, 2)}
     raise RuntimeError("no usable satellite image found (clouds or no lagoon detected)")
@@ -215,7 +215,7 @@ def make_outline(grid, now, method, z=None):
         if z is not None:
             outline_preview(terrain_rgb(z), ring, grid,
                             f"OpenStreetMap outline on terrain model ({props.get('name') or 'lagoon'})",
-                            HERE / CFG["outline_check_image_file"])
+                            DATA / CFG["outline_check_image_file"])
     save_outline(ring, props)
     merge_into_basin(grid, ring, props)
     return ring
