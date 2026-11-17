@@ -39,12 +39,15 @@ Everything lives in the **Zandmotor Kite** folder in your home folder:
 
 The lagoon model updates by itself: the maintainer publishes a new one after each calibration, and the next report picks it up.
 
+The label under the title says which lagoon model the report uses: **Shared lagoon model** with its publish date, or **No lagoon model** when none could be downloaded. Without a model, no lagoon is drawn and every hour shows *Lagoon unknown*. Wind, tide and kite advice still work.
+
 ### If something goes wrong
 
 - **"Zandmotor" can't be opened because it is from an unidentified developer**: right-click the icon, choose **Open**, then **Open** again. macOS remembers this.
 - **No internet**: the report needs the wind and tide forecasts, so it can't be built offline. A report you already have still opens; the map needs internet, the numbers don't.
 - **A message about settings.toml**: double-click **Change settings** to write the file again.
-- **Something else**: the Terminal window shows what went wrong. Copy that text when you ask for help.
+- **"Zandmotor is already running"**: a report is still being built in another window. Wait for it to finish.
+- **Something else**: the Terminal window says what went wrong in one line, and the full details are in `zandmotor.log` in your Zandmotor Kite folder. Send that file when you ask for help.
 
 ### Uninstall
 
@@ -174,6 +177,8 @@ scripts/publish-model.sh
 This writes a snapshot with `zandmotor --export-model` and uploads it to the `model` pre-release on GitHub. The snapshot holds the outline, the basin, the wetness map, the fitted response and fill-and-drain, the newest flats dry-override, the AHN tile and the coastal DTM. AHN is included even though anyone can download it: the basin is built from its gaps and is part of the wetness map's fingerprint, so a newer AHN would make the shared model unusable. Installed copies look for a new snapshot at most every 6 hours (`model_check_hours`), check every file's checksum, and keep the old model if anything fails. To test a snapshot locally: `zandmotor --shared-model path/to/zandmotor-model.zip`; in a checkout this overwrites your own model files.
 
 Installs come from the `main` branch, so keep `main` working and make bigger changes on a branch.
+
+Your own report (a checkout, or an installed copy that runs its own `--calibrate`) is the **admin view**. Its label says *Admin view* and it has an *Admin* panel with the model's fit and whether users get this model, a different (older) one, or none at all. Users' reports never show that panel. With the same model, both views show the same map and numbers.
 
 ### Configuration
 

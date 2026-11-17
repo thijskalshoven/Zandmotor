@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 import shlex
 import shutil
+import sys
 from pathlib import Path
 
 from PIL import Image
@@ -169,3 +170,30 @@ def run_setup(input_fn=input, print_fn=print, path=None):
 def ensure_user_dir():
     USER_DIR.mkdir(parents=True, exist_ok=True)
     (USER_DIR / CFG["kite_images_dir"]).mkdir(exist_ok=True)
+
+
+def install_launchers(desktop=None):
+    """The Zandmotor Kite folder with the double-click launchers, and one on
+    the Desktop. install.sh runs this after installing the app; the launchers
+    ship inside the package so they change with the code. Files made here,
+    not downloaded by a browser, carry no quarantine flag, so macOS opens
+    them without the "unidentified developer" block.
+
+    Each launcher runs this very interpreter (`python -m zandmotor`), not a
+    `zandmotor` assumed to be in ~/.local/bin: uv puts its tools elsewhere
+    when UV_TOOL_BIN_DIR or XDG_BIN_HOME is set."""
+    ensure_user_dir()
+    command = f"{shlex.quote(sys.executable)} -m zandmotor"
+    src = Path(__file__).resolve().parent / "launchers"
+    for f in sorted(src.glob("*.command")):
+        dest = USER_DIR / f.name
+        dest.write_text(f.read_text().replace("__ZANDMOTOR__", command))
+        dest.chmod(0o755)
+    desktop = Path(desktop) if desktop else Path.home() / "Desktop"
+    if desktop.is_dir():
+        link = desktop / "Zandmotor.command"
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(USER_DIR / "Zandmotor.command")
+    print(f"Launchers are in {USER_DIR}" + (", with a Zandmotor shortcut on the Desktop."
+                                           if desktop.is_dir() else "."))

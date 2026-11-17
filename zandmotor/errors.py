@@ -37,6 +37,10 @@ class ModelBundleError(ZandmotorError):
     update never raises it: a failed check keeps the model already there."""
 
 
+class AlreadyRunningError(ZandmotorError):
+    """Another run holds the run lock (cli._run_lock)."""
+
+
 class CalibrationIncompleteError(ZandmotorError):
     """Too many satellite requests failed during --calibrate to trust the
     record. Raised instead of fitting on what little arrived, so the cached

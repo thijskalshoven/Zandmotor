@@ -56,11 +56,27 @@ def test_verdict_tests_the_low_end_of_the_range():
     wind = (t, np.full(4, 18.0), np.full(4, 22.0), np.full(4, 270.0), np.full(4, 15.0), [],
             np.zeros(4))
     mask = np.ones((2, 2), bool)
-    sure = SimpleNamespace(at=lambda te: (mask, 5.0, 5.0), range_at=lambda te, area_ha=None: None)
+    sure = SimpleNamespace(at=lambda te: (mask, 5.0, 5.0), range_at=lambda te, area_ha=None: None,
+                           unknown=False)
     unsure = SimpleNamespace(at=lambda te: (mask, 5.0, 5.0),
-                             range_at=lambda te, area_ha=None: (2.0, 8.0))
+                             range_at=lambda te, area_ha=None: (2.0, 8.0), unknown=False)
     assert rideable_at(3600.0, sure, wind)[4] != "no"
     assert rideable_at(3600.0, unsure, wind)[4] == "no"     # 2 ha is below enough to ride
+
+
+def test_without_a_lagoon_model_no_hour_is_go_or_no():
+    from zandmotor.flood import rideable_at
+    from zandmotor.geometry import make_grid
+    from zandmotor.lagoon_model.runtime import LagoonWater
+    t = np.arange(4) * 3600.0
+    wind = (t, np.full(4, 18.0), np.full(4, 22.0), np.full(4, 270.0), np.full(4, 15.0), [],
+            np.zeros(4))
+    grid = make_grid((4.19, 52.05, 4.20, 52.06), 50.0)
+    lagoon = np.ones((grid.height, grid.width), bool)      # an outline is no evidence
+    water = LagoonWater(lagoon, grid, unknown=True)
+    ha, usable, _, _, verdict, notes, _, wet = rideable_at(3600.0, water, wind)
+    assert verdict == "unknown" and notes[0] == "lagoon unknown"
+    assert ha == usable == 0 and not wet.any()
 
 
 def test_trend_is_only_for_lake_mode():

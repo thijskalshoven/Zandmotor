@@ -325,6 +325,12 @@ def rideable_at(te, lagoon_water, wind):
     r = lagoon_water.range_at(te)
     w = wind_at(wind, te)
     quiver = quiver_advice(w, CFG["rider"])
+    if lagoon_water.unknown:
+        # no lagoon model: the wind and kite notes still hold, but whether there
+        # is water to ride can't be said, so no hour gets a go or a no
+        wind_txt, _, notes = kite_advice(w, float("inf"), quiver)
+        return (lagoon_ha, usable_ha, w, quiver, "unknown", ["lagoon unknown"] + notes,
+                wind_txt, wet)
     wind_txt, verdict, notes = kite_advice(w, usable_ha if r is None else min(usable_ha, r[0]),
                                            quiver)
     return lagoon_ha, usable_ha, w, quiver, verdict, notes, wind_txt, wet

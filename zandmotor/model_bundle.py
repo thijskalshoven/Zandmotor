@@ -158,6 +158,10 @@ def is_local(data=DATA):
     return (Path(data) / CFG["model_marker_local"]).exists()
 
 
+def unmark_local(data=DATA):
+    (Path(data) / CFG["model_marker_local"]).unlink(missing_ok=True)
+
+
 def mark_local(data=DATA):
     """This copy fitted its own model (--calibrate / --outline): stop the
     shared one from overwriting it."""
@@ -167,14 +171,56 @@ def mark_local(data=DATA):
         "Run zandmotor --shared-model to switch back.\n")
 
 
-def _get(url):
-    status, body = request_with_deadline("GET", url, CFG["model_request_deadline_s"])
+class NotPublished(ModelBundleError):
+    """The release has no model (HTTP 404): nothing was published yet."""
+
+
+def _get(url, deadline_s=None):
+    status, body = request_with_deadline("GET", url,
+                                         deadline_s or CFG["model_request_deadline_s"])
+    if status == 404:
+        raise NotPublished(f"{url} answered HTTP 404")
     if status != 200:
         raise ModelBundleError(f"{url} answered HTTP {status}")
     return body
 
 
-def update_if_newer(data=DATA, force=False, source=None):
+def published_manifest(deadline_s=30):
+    """The published snapshot's manifest, None if nothing is published.
+    Raises on network trouble. The small manifest gets a short deadline, so an
+    offline run doesn't wait out the one meant for the zip."""
+    try:
+        return json.loads(_get(CFG["model_manifest_url"], deadline_s=deadline_s))
+    except NotPublished:
+        return None
+
+
+# the per-day dry-override changes with every run, so it doesn't make the
+# model "differ" from the published one
+def _compared_files():
+    return [f for f in model_files()
+            if f != f"{CFG['cache_dir']}/{CFG['flats_dry_shared_file']}"]
+
+
+def publish_status(data=DATA):
+    """For the maintainer's report: does the published snapshot hold this
+    copy's model? Returns (state, published manifest or None), state one of
+    "same", "differs", "unpublished", "unchecked" (with the error text in
+    place of the manifest)."""
+    try:
+        remote = published_manifest(deadline_s=10)      # every admin run asks
+    except (requests.RequestException, ValueError, ModelBundleError) as e:
+        return "unchecked", str(e)
+    if remote is None:
+        return "unpublished", None
+    for f in _compared_files():
+        path = Path(data) / f
+        if not path.exists() or remote["files"].get(f) != _sha256(path.read_bytes()):
+            return "differs", remote
+    return "same", remote
+
+
+def update_if_newer(data=DATA, force=False, source=None, progress=None):
     """Brings the shared model up to date. Returns (manifest or None, note):
     the note is a warning for the report, or "" when there is nothing to say.
 
@@ -182,7 +228,9 @@ def update_if_newer(data=DATA, force=False, source=None):
     on any failure keeps the model already there - a missed update only
     matters when there is no model at all. With force (--shared-model) it
     always downloads, clears the local mark, and raises ModelBundleError.
-    `source` is a local zip to install instead of the published one."""
+    `source` is a local zip to install instead of the published one;
+    `progress(msg)` gets a plain line before the download, which can take a
+    while the first time."""
     data = Path(data)
     current = installed_manifest(data)
     stamp = data / CHECK_STAMP
@@ -198,12 +246,18 @@ def update_if_newer(data=DATA, force=False, source=None):
         if source:
             manifest = install_bundle(Path(source).read_bytes(), data)
         else:
-            remote = json.loads(_get(CFG["model_manifest_url"]))
+            remote = published_manifest()
+            if remote is None:
+                raise NotPublished(f"{CFG['model_manifest_url']} answered HTTP 404")
             have_all = all((data / f).exists() for f in (current or {}).get("files", {}))
             if force or current is None or remote.get("created") != current.get("created") \
                     or not have_all:
                 log.info("Downloading the shared lagoon model (published %s)...",
                          remote.get("created"))
+                if progress:
+                    progress("Downloading the lagoon model" + (
+                        " (the first time this takes a minute)..." if current is None
+                        else " published " + str(remote.get("created", ""))[:10] + "..."))
                 manifest = install_bundle(_get(CFG["model_bundle_url"]), data)
             else:
                 manifest = current
@@ -213,8 +267,11 @@ def update_if_newer(data=DATA, force=False, source=None):
             raise ModelBundleError(f"Could not install the shared lagoon model: {e}") from e
         log.warning("Could not update the shared lagoon model (%s)", e)
         if current is None:
-            return None, ("Could not download the shared lagoon model, so the lagoon is shown "
-                          "without it. Check the internet connection and run again.")
+            if isinstance(e, NotPublished):
+                return None, ("No lagoon model has been published yet, so the lagoon can't be "
+                              "shown. It appears by itself once the maintainer publishes one.")
+            return None, ("Could not download the lagoon model, so the lagoon can't be shown. "
+                          "Check the internet connection and run again.")
         return current, ""
     if force:
         (data / CFG["model_marker_local"]).unlink(missing_ok=True)

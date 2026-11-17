@@ -60,4 +60,6 @@ A normal run calls live external APIs (PDOK, Rijkswaterstaat, Open-Meteo and opt
 - Test kite upper limits against the gust, not the mean wind.
 - Personal settings (rider, quiver, wetsuit) belong in `settings.toml`, never as new defaults in `CFG`. A new personal key needs a place in `settings.py`'s `_TABLES`, `load_settings`, `dump_settings` and the template.
 - Warnings that tell the user to run `--calibrate` or `--outline` go through `cli._hint()`: users of an installed copy can't run them.
+- In the user view the Terminal shows only `cli._progress()` lines and warnings; details go to the log at INFO for the admin view. Unexpected errors become one plain line plus `zandmotor.log` (`cli._crash`); `-v` shows the traceback. One run at a time (`cli._run_lock`).
+- Two views (`cli._is_admin()`): the admin view (checkout, or a copy with its own model) may fall back to the whole outline and shows the Admin panel; the user view never traces an outline or uses the placeholder. Without the shared model it shows no lagoon and the verdict "unknown" (`LagoonWater(unknown=True)`). Both must show the same numbers from the same model.
 - Commit only when asked.

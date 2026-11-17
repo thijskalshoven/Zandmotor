@@ -16,3 +16,5 @@ model_manifest.json
 model_checked
 LOCAL_MODEL
 .staging/
+.lock
+zandmotor.log

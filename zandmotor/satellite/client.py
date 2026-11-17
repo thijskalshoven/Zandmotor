@@ -31,7 +31,7 @@ class CdseToken:
         self.secret = os.environ.get("CDSE_CLIENT_SECRET")
         if not self.cid or not self.secret:
             raise RuntimeError("Set CDSE_CLIENT_ID and CDSE_CLIENT_SECRET for --calibrate "
-                               "(see top of file).")
+                               "(see \"Satellite data\" in the README).")
         self._token, self._expires = None, 0.0
         self.refresh()
 

@@ -112,3 +112,23 @@ def test_a_snapshot_for_a_newer_app_asks_for_an_update(tmp_path, monkeypatch):
     zip_path, _ = _export(tmp_path)
     got, note = model_bundle.update_if_newer(data=tmp_path / "user", source=zip_path)
     assert "Update Zandmotor" in note
+
+
+def test_nothing_published_is_said_plainly(tmp_path, monkeypatch):
+    monkeypatch.setattr(model_bundle, "request_with_deadline", lambda *a, **kw: (404, b""))
+    got, note = model_bundle.update_if_newer(data=tmp_path / "user")
+    assert got is None and "No lagoon model has been published" in note
+
+
+def test_publish_status_compares_the_model_files(tmp_path, monkeypatch):
+    zip_path, _ = _export(tmp_path)
+    _serve(monkeypatch, zip_path, [])
+    mine = tmp_path / "maintainer"
+    assert model_bundle.publish_status(mine)[0] == "same"
+    # the daily dry-override changes on every run and doesn't count
+    (mine / "cache" / CFG["flats_dry_shared_file"]).write_bytes(b"new day")
+    assert model_bundle.publish_status(mine)[0] == "same"
+    (mine / "cache" / CFG["fill_drain_file"]).write_bytes(b"refitted")
+    assert model_bundle.publish_status(mine)[0] == "differs"
+    monkeypatch.setattr(model_bundle, "request_with_deadline", lambda *a, **kw: (404, b""))
+    assert model_bundle.publish_status(mine) == ("unpublished", None)

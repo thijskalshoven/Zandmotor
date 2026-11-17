@@ -38,9 +38,17 @@ def fetch_wind(lat, lon, forecast_days=7, past_days=2):
                     for a, b in zip(day.get("sunrise") or [], day.get("sunset") or [])]
         rain = np.array([np.nan if v is None else v for v in h.get("precipitation") or
                          [None] * len(t)], float)
-        return (t, np.array(h["wind_speed_10m"], float), np.array(h["wind_gusts_10m"], float),
-                np.array(h["wind_direction_10m"], float),
-                np.array(h["temperature_2m"], float), daylight, rain)
+
+        def col(name):
+            return np.array([np.nan if v is None else v for v in h[name]], float)
+        spd, gst, dirn = col("wind_speed_10m"), col("wind_gusts_10m"), col("wind_direction_10m")
+        # the last forecast hours sometimes come back empty; interpolated, a
+        # missing value turned the kite advice and the windows into "nan kn"
+        ok = np.isfinite(spd) & np.isfinite(gst) & np.isfinite(dirn)
+        if not ok.any():
+            raise ValueError("no wind values returned")
+        return (t[ok], spd[ok], gst[ok], dirn[ok], col("temperature_2m")[ok], daylight,
+                rain[ok])
     except (requests.RequestException, KeyError, ValueError) as e:
         log.warning("No wind data (%s); the map still works without it.", e)
         return None

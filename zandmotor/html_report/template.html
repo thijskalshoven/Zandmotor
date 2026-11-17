@@ -18,7 +18,7 @@ h1{font-family:"Barlow Semi Condensed",Barlow,sans-serif;font-size:26px;margin:0
 input[type=range]{width:100%;margin:16px 0 4px;accent-color:var(--buoy)}
 .ticks{display:flex;justify-content:space-between;color:var(--muted);font-size:12px}
 .verdict{margin:18px 0 6px;padding:12px 14px;border-radius:10px;color:#fff;font-weight:600;font-size:18px}
-.verdict.go{background:var(--go)}.verdict.maybe{background:var(--maybe)}.verdict.no{background:var(--no)}
+.verdict.go{background:var(--go)}.verdict.maybe{background:var(--maybe)}.verdict.no{background:var(--no)}.verdict.unknown{background:var(--muted)}
 .notes{font-size:14px;color:var(--muted);min-height:18px}
 dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:16px 0;font-size:15px}
 dt{color:var(--muted)}dd{margin:0;font-weight:500;text-align:right}
@@ -49,6 +49,15 @@ svg.chart{width:100%;height:120px;display:block;margin-top:6px}
 .sw{width:18px;height:12px;border-radius:3px;border:1px solid rgba(0,0,0,.12)}
 .fine{font-size:12px;color:var(--muted);margin-top:18px;line-height:1.45}
 .warn{background:#fff4e5;border:1px solid #f3d3a8;border-radius:8px;padding:8px 10px;font-size:13px;margin-bottom:14px}
+.more-warn{margin:-6px 0 14px;font-size:13px}.more-warn summary{cursor:pointer;color:var(--muted);margin-bottom:8px}
+/* which lagoon model this report shows: the maintainer's own, the shared one, or none */
+.view{display:inline-block;border-radius:999px;padding:3px 10px;font-size:12px;margin:-8px 0 14px;border:1px solid var(--line);color:var(--muted)}
+.view b{color:var(--ink)}
+.view.admin{background:#10293a;border-color:#10293a;color:#c9d6df}.view.admin b{color:#fff}
+.view.none{background:#fbeceb;border-color:#efc4c0}
+.admin-panel{border:1px dashed #10293a;border-radius:8px;padding:8px 10px;font-size:13px;margin-bottom:14px}
+.admin-panel h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;margin:0 0 4px;color:var(--muted)}
+.admin-panel p{margin:4px 0}.admin-panel p.warn-line{color:var(--no);font-weight:600}.admin-panel p.ok-line{color:var(--go)}
 .quiver{margin-top:24px;padding-top:18px;border-top:1px solid var(--line)}
 .quiver h2{font-family:"Barlow Semi Condensed",Barlow,sans-serif;font-size:19px;margin:0 0 12px}
 .q-item{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}
@@ -85,6 +94,8 @@ table.tides td.kind{color:var(--muted);width:42%}
 <aside>
   <h1>Zandmotor lagoon</h1>
   <p class="sub">Generated __GENERATED__ from __LOCATION__ water levels</p>
+  <div id="view"></div>
+  <div id="adminPanel"></div>
   __WARNINGS__
   <div class="time" id="time"></div><div class="day" id="day"></div>
   <input type="range" id="slider" min="0" max="__MAXI__" value="0" aria-label="Time">
@@ -175,7 +186,7 @@ try {
   (pick === 'terrain' ? terrain : pick === 'map' ? osm : aerial).addTo(map);
   L.control.layers(bases, null, {position:'topright'}).addTo(map);
   // lagoon plus the sea and dunes around it (whole modelled area on the terrain view)
-  map.fitBounds(pick === 'terrain' ? D.bounds : L.latLngBounds(D.lagoon_bounds).pad(1.2));
+  map.fitBounds(pick === 'terrain' ? D.bounds : L.latLngBounds(D.lagoon_bounds).pad(D.lagoon.length ? 1.2 : 0));
   // Compass rose, top-left: the arrow points where the wind blows TO
   // (the forecast gives where it comes FROM, so it is turned 180 degrees).
   const Rose = L.Control.extend({options:{position:'topleft'}, onAdd(){
@@ -218,8 +229,19 @@ try {
   document.getElementById('map').innerHTML = '<p style="padding:20px">The map could not load (no internet?). The numbers on the left still work.</p>';
 }
 const $ = id => document.getElementById(id);
-const words = {go:'Looks rideable', maybe:'Rideable, with caveats', no:'Not rideable'};
+const words = {go:'Looks rideable', maybe:'Rideable, with caveats', no:'Not rideable',
+               unknown:'Lagoon unknown'};
 const qWords = {ideal:'Ideal', marginal:'Marginal', off:'Not this one'};
+// the badge says which lagoon model this is; only the maintainer's report
+// carries the admin panel (publish status, fit), so the two views can't be
+// mistaken for each other
+function initView(){
+  const esc = t => String(t).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  if (D.view) $('view').innerHTML =
+    `<div class="view ${D.view.kind}"><b>${esc(D.view.title)}</b> · ${esc(D.view.detail)}</div>`;
+  if (D.admin) $('adminPanel').innerHTML = '<div class="admin-panel"><h2>Admin</h2>' +
+    D.admin.map(([k, t]) => `<p class="${k ? k+'-line' : ''}">${esc(t)}</p>`).join('') + '</div>';
+}
 function initQuiver(){
   // height and board are optional in settings.toml
   $('riderInfo').textContent = `${D.rider.weight_kg}kg` +
@@ -303,10 +325,10 @@ function draw(i){
   $('lag').textContent = (f.lagoon_label || D.lagoon_label || (f.lagoon_ha.toFixed(1)+' ha')) +
     (f.lagoon_range ? ` · likely ${f.lagoon_range[0].toFixed(1)}–${f.lagoon_range[1].toFixed(1)} ha` : '');
   // the largest connected patch of lagoon water is what the verdict tests
-  $('patch').textContent = f.usable_ha.toFixed(1)+' ha';
+  $('patch').textContent = f.verdict === 'unknown' ? '—' : f.usable_ha.toFixed(1)+' ha';
   // drawn only: the verdict never uses it
-  $('probable').textContent = f.probable ? 'probably up to '+f.probable_ha.toFixed(1)+' ha (not counted)'
-                                         : 'no extra water';
+  $('probable').textContent = f.verdict === 'unknown' ? '—' :
+    f.probable ? 'probably up to '+f.probable_ha.toFixed(1)+' ha (not counted)' : 'no extra water';
   $('wind').textContent = f.wind;
   $('wtemp').textContent = f.water_c == null ? '—' : f.water_c.toFixed(1)+' °C';
   $('suit').textContent = f.wetsuit || '—';
@@ -452,6 +474,7 @@ function obschart(){
 if (D.lagoon_varies) $('lagwrap').style.display = '';
 $('slider').addEventListener('input', e => draw(+e.target.value));
 $('t0').textContent = D.frames[0].time; $('t1').textContent = D.frames[D.frames.length-1].time;
+initView();
 initQuiver();
 initWindows();
 initTides();

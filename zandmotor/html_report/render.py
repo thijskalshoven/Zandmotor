@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import html
 import json
 from pathlib import Path
 
@@ -12,10 +13,25 @@ from zandmotor.kiting import quiver_image_uri
 _TEMPLATE_PATH = Path(__file__).resolve().parent / "template.html"
 
 
+def warnings_html(warnings, shown=2):
+    """The warning boxes: the first `shown`, and the rest folded away. A fresh
+    install once stacked seven of them above the verdict, which then sat
+    below the fold. Escaped: some carry error text from a server."""
+    boxes = [f'<div class="warn">{html.escape(w)}</div>' for w in warnings]
+    if len(boxes) <= shown + 1:
+        return "".join(boxes)
+    rest = boxes[shown:]
+    return ("".join(boxes[:shown]) + f'<details class="more-warn"><summary>{len(rest)} more '
+            f'notes</summary>{"".join(rest)}</details>')
+
+
 def write_html(path, frames, grid, lagoon_ring, location, terrain_note, warnings, terrain_uri,
                windows, tides, lagoon_obs, lagoon_label, lagoon_varies, sources,
-               lagoon_trend=None):
+               lagoon_trend=None, view=None, admin=None):
     template = _TEMPLATE_PATH.read_text(encoding="utf-8")
+    # no ring when a user's copy has no lagoon model: nothing to outline, and
+    # the map frames the whole area instead
+    lagoon_ring = lagoon_ring or []
     lats = [p[1] for p in lagoon_ring]
     lons = [p[0] for p in lagoon_ring]
     # brand, colour, year and photo are optional in settings.toml
@@ -24,7 +40,8 @@ def write_html(path, frames, grid, lagoon_ring, location, terrain_note, warnings
                     "image": quiver_image_uri(k.get("image"), warnings)} for k in CFG["quiver"]]
     data = {"bounds": grid.latlon_bounds, "frames": frames, "terrain": terrain_uri,
             "lagoon": [[lat, lon] for lon, lat in lagoon_ring],
-            "lagoon_bounds": [[min(lats), min(lons)], [max(lats), max(lons)]],
+            "lagoon_bounds": ([[min(lats), min(lons)], [max(lats), max(lons)]] if lagoon_ring
+                              else grid.latlon_bounds),
             "quiver_meta": quiver_meta, "rider": CFG["rider"],
             "min_rideable_ha": CFG["min_rideable_ha"],
             "windows": windows["list"], "windows_none": windows["none"],
@@ -35,8 +52,10 @@ def write_html(path, frames, grid, lagoon_ring, location, terrain_note, warnings
             "lagoon_varies": bool(lagoon_varies),
             "sources": sources,
             # size over time: images, the replay between them, the estimate ahead
-            "lagoon_trend": lagoon_trend}
-    warn_html = "".join(f'<div class="warn">{w}</div>' for w in warnings)
+            "lagoon_trend": lagoon_trend,
+            # which model this report shows, and the maintainer's own panel
+            "view": view, "admin": admin}
+    warn_html = warnings_html(warnings)
     html = (template
             .replace("__DATA__", json.dumps(data))
             .replace("__MAXI__", str(len(frames) - 1))

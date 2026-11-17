@@ -22,6 +22,7 @@ class _FixedLagoon:
     def __init__(self, ha):
         import numpy as np
         self.ha, self.mask = ha, np.zeros((2, 2), bool)
+        self.unknown = False
 
     def at(self, te):
         return self.mask, self.ha, self.ha

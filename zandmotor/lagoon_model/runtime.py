@@ -164,17 +164,26 @@ class LagoonWater:
     within what the surge filled, so it drains from the edges the record
     sees wet least often. In the tidal and wind modes the area comes from
     the model's area_at() for each instant.
+    With `unknown` (a user's copy without the shared model) there is no
+    lagoon at all: no water is drawn or counted, and rideable_at calls every
+    hour "unknown". The whole-outline fallback is for the maintainer only:
+    shown to a user it once painted a 1.4 km placeholder box over the sea as
+    lagoon, when neither the model nor OpenStreetMap could be reached.
     at(te) returns (wet_mask, lagoon_ha, largest_patch_ha)."""
 
     def __init__(self, lagoon, grid, model=None, freq=None, sea_level_fn=None,
-                 wind_hist=None, lake_area=None, basin=None, fill_drain=None, range_fn=None):
+                 wind_hist=None, lake_area=None, basin=None, fill_drain=None, range_fn=None,
+                 unknown=False):
         self.lagoon, self.grid = lagoon, grid
+        self.unknown = unknown
         self.region = lagoon if basin is None else basin | lagoon
         self.model, self.freq = model, freq
         self.sea_level_fn, self.wind_hist, self.lake_area = sea_level_fn, wind_hist, lake_area
         self._fixed, self.fill_drain, self._sized = None, None, {}
         self.range_fn = range_fn
-        if model is None or freq is None:
+        if unknown:
+            self._fixed = self._finish(np.zeros_like(lagoon))
+        elif model is None or freq is None:
             self._fixed = self._finish(lagoon.copy())
         elif model.mode == "lake" and lake_area is not None:
             self._fixed = self._finish(
